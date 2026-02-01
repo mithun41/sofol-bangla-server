@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from .models import User
+from .models import BonusLog, User, WithdrawalRequest
 
 
 class RegisterSerializer(serializers.ModelSerializer):
@@ -55,3 +55,19 @@ class UserListSerializer(serializers.ModelSerializer):
         if obj.is_superuser:
             return "admin"
         return obj.role
+    
+class BonusLogSerializer(serializers.ModelSerializer):
+    user_username = serializers.ReadOnlyField(source='user.username')
+
+    class Meta:
+        model = BonusLog
+        fields = ['id', 'user_username', 'amount', 'reason', 'timestamp']
+        
+
+
+class WithdrawalSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = WithdrawalRequest
+        fields = ['id', 'amount', 'method', 'account_number', 'status', 'created_at']
+        read_only_fields = ['status', 'created_at']
+        

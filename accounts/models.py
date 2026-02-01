@@ -1,29 +1,25 @@
 from django.contrib.auth.models import AbstractUser
 from django.db import models
 import uuid
+from django.conf import settings
 
 class User(AbstractUser):
     name = models.CharField(max_length=255, blank=True)
     email = models.EmailField(unique=True)
     phone = models.CharField(max_length=15, unique=True)
+    profile_picture = models.ImageField(upload_to='profile_pics/', null=True, blank=True)
     reff_id = models.CharField(max_length=12, unique=True, blank=True)
     placement_id = models.CharField(max_length=12, unique=True, blank=True)
     
+    # Binary/MLM Data
     position = models.CharField(max_length=10, choices=[('left', 'Left'), ('right', 'Right')], null=True, blank=True)
     left_count = models.IntegerField(default=0)
     right_count = models.IntegerField(default=0)
-    balance = models.DecimalField(max_digits=12, decimal_places=2, default=0.00)
+    balance = models.DecimalField(max_digits=12, decimal_places=2, default=0.00) 
+    points = models.IntegerField(default=0) 
     
     referred_by = models.ForeignKey('self', on_delete=models.SET_NULL, null=True, blank=True, related_name='reff_users')
     placement_under = models.ForeignKey('self', on_delete=models.SET_NULL, null=True, blank=True, related_name='placement_users')
-    
-    # Binary Data
-    position = models.CharField(max_length=10, choices=[('left', 'Left'), ('right', 'Right')], null=True, blank=True)
-    left_count = models.IntegerField(default=0)
-    right_count = models.IntegerField(default=0)
-
-    balance = models.DecimalField(max_digits=12, decimal_places=2, default=0.00) 
-    points = models.IntegerField(default=0) 
     
     status = models.CharField(max_length=10, choices=(('active', 'Active'), ('inactive', 'Inactive')), default='inactive')
     star_level = models.IntegerField(default=0)
@@ -38,3 +34,33 @@ class User(AbstractUser):
         if self.is_superuser:
             self.role = 'admin'
         super().save(*args, **kwargs)
+
+class BonusLog(models.Model):
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL, 
+        on_delete=models.CASCADE, 
+        related_name='bonus_logs'
+    )
+    amount = models.DecimalField(max_digits=10, decimal_places=2)
+    reason = models.CharField(max_length=255)
+    timestamp = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return f"{self.user.username} - {self.amount} TK"
+
+class WithdrawalRequest(models.Model):
+    STATUS_CHOICES = (
+        ('pending', 'Pending'),
+        ('approved', 'Approved'),
+        ('rejected', 'Rejected'),
+    )
+
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='withdrawals')
+    amount = models.DecimalField(max_digits=10, decimal_places=2)
+    method = models.CharField(max_length=50) 
+    account_number = models.CharField(max_length=20)
+    status = models.CharField(max_length=10, choices=STATUS_CHOICES, default='pending')
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return f"{self.user.username} - {self.amount} ({self.status})"
