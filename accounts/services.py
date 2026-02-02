@@ -1,91 +1,90 @@
-from .models import User
 from decimal import Decimal
 from django.db import transaction
-from .models import BonusLog
+from .models import BonusLog, User
 
+def update_user_rank(user):
+    matching = min(user.total_left, user.total_right)
+    new_star = 0
+    if matching >= 1200: new_star = 8
+    elif matching >= 500: new_star = 7
+    elif matching >= 200: new_star = 6
+    elif matching >= 50: new_star = 5
+    elif matching >= 15: new_star = 4
+    
+    if new_star > user.star_level:
+        user.star_level = new_star
+        user.save()
 
+from decimal import Decimal
+from django.db import transaction
+from .models import BonusLog, User
 
 def distribute_binary_matching(child):
     """
-    একজন ইউজার তখনই বোনাস পাবে যখন তার বাম এবং ডান চাইল্ড 
-    উভয়েই একটি করে নতুন পেয়ার (ম্যাচিং) সম্পন্ন করবে।
+    শর্ত ১: সরাসরি ২ জন চাইল্ড একটিভ হলে প্যারেন্ট ৪০০ পাবে।
+    শর্ত ২: এরপর ২ জন চাইল্ড বোনাস পেলে প্যারেন্ট ৪০০ পাবে।
     """
     current_node = child
     parent = child.placement_under
 
     while parent is not None:
         with transaction.atomic():
-            # ১. সরাসরি মেম্বার কাউন্ট না করে আমরা ট্র্যাক করছি কতগুলো 'পয়েন্ট' বা 'পেয়ার ইউনিট' বাড়ছে
-            # এই লজিকে প্রতি ২ জন মেম্বার (১টি পেয়ার) = ১টি ইউনিট
+            # লাইফটাইম কাউন্ট আপডেট (সবসময় হবে)
             if current_node.position == 'left':
+                parent.total_left += 1
                 parent.left_count += 1
             else:
+                parent.total_right += 1
                 parent.right_count += 1
             
-            # ২. আমাদের দরকার ১:১ ম্যাচিং (অর্থাৎ বামে ২ জন এবং ডানে ২ জন হলে ১টি ৪০০ টাকার ম্যাচিং)
-            # এখানে // ২ ব্যবহার করলে ২ জন মেম্বারকে ১টি 'পেয়ার ইউনিট' হিসেবে ধরা হয়
-            left_units = parent.left_count // 2
-            right_units = parent.right_count // 2
-            
-            # ৩. যদি দুই পাশেই অন্তত ১টি করে পেয়ার ইউনিট থাকে
-            if left_units >= 1 and right_units >= 1:
-                # কতগুলো ম্যাচিং হচ্ছে (আপনার ক্ষেত্রে ১টিই হবে)
-                matches = min(left_units, right_units)
-                bonus_amount = Decimal(400) # নির্দিষ্ট ৪০০ টাকা
+            # প্যারেন্টের সরাসরি দুই চাইল্ড বের করা
+            left_c = User.objects.filter(placement_under=parent, position='left').first()
+            right_c = User.objects.filter(placement_under=parent, position='right').first()
+
+            if left_c and right_c:
+                # ১. চেক করা চাইল্ডরা নিজেরা বোনাস পেয়েছে কি না (অথবা তারা কি প্রথম জোড়া?)
+                # paid_matches হলো কয়টি জোড়া তারা মিলিয়েছে তার সংখ্যা
+                left_bonus_count = left_c.paid_matches
+                right_bonus_count = right_c.paid_matches
                 
-                # ব্যালেন্স আপডেট
-                parent.balance += bonus_amount
+                # যদি উভয় চাইল্ডই নতুন একটিভ হয় (paid_matches ০) অথবা 
+                # তারা নিজেরা নতুন বোনাস পায়, তবে প্যারেন্টের 'টোটাল পসিবল ম্যাচ' বাড়বে।
+                # আমরা চেক করব দুই চাইল্ডের ন্যূনতম ম্যাচিং কত।
                 
-                # বোনাস লগ (সঠিক কারণসহ)
-                BonusLog.objects.create(
-                    user=parent,
-                    amount=bonus_amount,
-                    reason=f"Level matching bonus triggered by {child.username}'s branch completion."
-                )
+                # প্রথমবার একটিভ হওয়ার জন্য আমরা +১ ধরি যাতে প্রথম ৪০০ টাকা পায়।
+                effective_left = left_bonus_count + (1 if left_c.status == 'active' else 0)
+                effective_right = right_bonus_count + (1 if right_c.status == 'active' else 0)
                 
-                # ৪. সবথেকে গুরুত্বপূর্ণ: ব্যবহৃত ২ জন করে মেম্বারকে কাউন্ট থেকে বাদ দেওয়া
-                # যাতে পরবর্তী ৪০০ টাকার জন্য আবার নতুন করে ২ জন ২ জন লাগে।
-                parent.left_count -= (matches * 2)
-                parent.right_count -= (matches * 2)
-                
-                print(f"Strategic Bonus: {parent.username} earned 400 TK")
+                total_eligible_matches = min(effective_left, effective_right)
+
+                # ২. যদি প্যারেন্ট আগে এই জোড়ার টাকা না পেয়ে থাকে
+                if total_eligible_matches > parent.paid_matches:
+                    new_matches = total_eligible_matches - parent.paid_matches
+                    bonus_amount = Decimal(new_matches * 400)
+                    
+                    parent.balance += bonus_amount
+                    parent.paid_matches = total_eligible_matches # ম্যাচ কাউন্ট আপডেট
+                    parent.save()
+
+                    BonusLog.objects.create(
+                        user=parent, 
+                        amount=bonus_amount,
+                        reason=f"Binary bonus: Child pair {left_c.username} & {right_c.username} matched/active"
+                    )
 
             parent.save()
-            
-            # লুপ উপরে চলতে থাকবে
+            # লুপ উপরের দিকে যাবে
             current_node = parent
             parent = parent.placement_under
-            
-# accounts/services.py
+
 def calculate_commission(user):
-    if user.status == 'inactive': # user-ke active korar trigger
-        user.status = 'active'
-        user.save()
-
-        # ১. Direct Referral Bonus (৫০০ টাকা সরাসরি রেফারারকে)
-        if user.referred_by:
-            referrer = user.referred_by
-            referrer.balance += 500  # <--- Ekhane balance-e 500 taka add hobe
-            referrer.save()
-
-        # ২. Binary Matching Bonus
-        distribute_binary_matching(user)
-
-def distribute_binary_matching(child):
-    parent = child.placement_under
-    current_child = child
-
-    while parent is not None:
-        if current_child.position == 'left':
-            parent.left_count += 1
-        else:
-            parent.right_count += 1
-        
-        if parent.left_count > 0 and parent.right_count > 0:
-            parent.balance += 400  # <--- Matching bonus taka-e dile ekhane balance hobe
-            parent.left_count -= 1 
-            parent.right_count -= 1
-            
-        parent.save()
-        current_child = parent
-        parent = parent.placement_under
+    if user.referred_by:
+        ref = user.referred_by
+        ref.balance += Decimal(500)
+        BonusLog.objects.create(
+            user=ref, amount=500, 
+            reason=f"Referral bonus: {user.username}"
+        )
+        ref.save()
+    
+    distribute_binary_matching(user)

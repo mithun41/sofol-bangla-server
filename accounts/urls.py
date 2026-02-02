@@ -6,8 +6,8 @@ from .views import (
     RegisterView, 
     UserListView, 
     UserProfileView, 
-    UserUpdateView,     # নতুন এডিট ভিউ
-    ActivateUserView,   # টেস্ট অ্যাক্টিভেশন ভিউ
+    UserUpdateView,     
+    ActivateUserView,  
     BinaryTreeView,
     WithdrawalListCreateView,
     admin_approve_withdraw,
@@ -25,7 +25,7 @@ urlpatterns = [
     
     # Admin Specific APIs
     path('all-users/', UserListView.as_view(), name='all_users'),
-    path('users/<int:pk>/', UserUpdateView.as_view(), name='user-update'), # এখান থেকে ইউজার এডিট/একটিভ হবে
+    path('users/<int:pk>/', UserUpdateView.as_view(), name='user-update'), 
     
     # Matching Bonus Testing API
     path('activate-test/<int:user_id>/', ActivateUserView.as_view(), name='activate_test'),
