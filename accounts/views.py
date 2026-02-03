@@ -5,6 +5,8 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 from rest_framework.permissions import IsAuthenticated, IsAdminUser, AllowAny
 from rest_framework.decorators import api_view, permission_classes
+from rest_framework_simplejwt.views import TokenObtainPairView
+from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
 
 from accounts.services import calculate_commission, update_user_rank
 from .models import BonusLog, User, WithdrawalRequest
@@ -45,6 +47,7 @@ class UserProfileView(APIView):
             "username": user.username,
             "email": user.email,
             "phone": user.phone, 
+            "role": user.role,
             "profile_picture": profile_pic,
             "balance": user.balance,
             "points": user.points,
@@ -64,6 +67,20 @@ class UserProfileView(APIView):
         if 'profile_picture' in request.FILES: user.profile_picture = request.FILES['profile_picture']
         user.save()
         return Response({"message": "Profile updated successfully!"})
+    
+    
+class MyTokenObtainPairSerializer(TokenObtainPairSerializer):
+    def validate(self, attrs):
+        data = super().validate(attrs)
+        # ফ্রন্টএন্ডের জন্য অতিরিক্ত ডাটা যোগ করা
+        data['username'] = self.user.username
+        data['role'] = self.user.role
+        data['name'] = self.user.name if self.user.name else self.user.username
+        data['profile_picture'] = self.user.profile_picture.url if self.user.profile_picture else None
+        return data
+
+class MyTokenObtainPairView(TokenObtainPairView):
+    serializer_class = MyTokenObtainPairSerializer
 
 # --- ADMIN USER MANAGEMENT & ACTIVATION ---
 
