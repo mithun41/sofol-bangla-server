@@ -17,23 +17,93 @@ from .serializers import (
 
 # --- USER AUTH & PROFILE ---
 
+from .services import find_auto_placement
+
 class RegisterView(generics.CreateAPIView):
     serializer_class = RegisterSerializer
-    permission_classes = [AllowAny] # নিশ্চিত করুন এটি কাজ করছে
-    authentication_classes = []     # এই ভিউয়ের জন্য সব অথেন্টিকেশন বন্ধ করে দিন
+    permission_classes = [AllowAny]
+    authentication_classes = []
 
     def create(self, request, *args, **kwargs):
-        serializer = self.get_serializer(data=request.data)
-        serializer.is_valid(raise_exception=True)
-        user = serializer.save()
-        return Response({
-            "message": "User registered successfully!",
-            "user": {
-                "username": user.username,
-                "reff_id": user.reff_id,
-                "placement_id": user.placement_id
-            }
-        }, status=status.HTTP_201_CREATED)
+        data = request.data
+        
+        # ১. রেফারার চেক (ঐচ্ছিক)
+        reff_id = data.get('reff_id')
+        referrer = None
+        if reff_id:
+            try:
+                referrer = User.objects.get(reff_id=reff_id)
+            except User.DoesNotExist:
+                return Response({"error": "Invalid Referral ID"}, status=status.HTTP_400_BAD_REQUEST)
+
+        # ২. প্লেসমেন্ট লজিক (অটো এবং ম্যানুয়াল মিক্সড)
+        placement_id = data.get('placement_id')
+        position = data.get('position')
+        final_parent = None
+        final_pos = None
+
+        # ক. যদি নির্দিষ্ট প্লেসমেন্ট আইডি এবং পজিশন থাকে (Manual)
+        if placement_id and position:
+            try:
+                target_parent = User.objects.get(placement_id=placement_id)
+                # পজিশন চেক: যদি পজিশন খালি থাকে তবেই বসবে
+                if not User.objects.filter(placement_under=target_parent, position=position).exists():
+                    final_parent = target_parent
+                    final_pos = position
+                else:
+                    # পজিশন খালি না থাকলে ওই প্লেসমেন্টের নিচ থেকে BFS শুরু হবে
+                    final_parent, final_pos = find_auto_placement(target_parent)
+            except User.DoesNotExist:
+                return Response({"error": "Invalid Placement ID"}, status=400)
+
+        # খ. যদি শুধু প্লেসমেন্ট আইডি থাকে কিন্তু পজিশন না থাকে
+        elif placement_id:
+            try:
+                target_parent = User.objects.get(placement_id=placement_id)
+                final_parent, final_pos = find_auto_placement(target_parent)
+            except User.DoesNotExist:
+                return Response({"error": "Invalid Placement ID"}, status=400)
+
+        # গ. যদি প্লেসমেন্ট আইডি না থাকে কিন্তু রেফারার থাকে (অটো প্লেসমেন্ট)
+        elif referrer:
+            final_parent, final_pos = find_auto_placement(referrer)
+        
+        # ঘ. যদি কোনো কিছুই না থাকে তবে রুট/অ্যাডমিন থেকে শুরু হবে
+        else:
+            root_user = User.objects.filter(is_superuser=True).first()
+            if root_user:
+                final_parent, final_pos = find_auto_placement(root_user)
+            else:
+                # একদম প্রথম ইউজারের ক্ষেত্রে
+                final_parent, final_pos = None, None
+
+        # ৩. ইউজার তৈরি করা
+        try:
+            with transaction.atomic():
+                user = User.objects.create_user(
+                    username=data.get('username'),
+                    email=data.get('email'),
+                    password=data.get('password'),
+                    phone=data.get('phone'),
+                    name=data.get('name', ''),
+                    division=data.get('division', ''), 
+                    referred_by=referrer,
+                    placement_under=final_parent,
+                    position=final_pos,
+                    status='inactive' # রেজিস্ট্রেশনের সময় ইনঅ্যাক্টিভ রাখা নিরাপদ
+                )
+
+                return Response({
+                    "message": "User registered successfully!",
+                    "user_info": {
+                        "username": user.username,
+                        "placement_under": final_parent.username if final_parent else "None",
+                        "position": final_pos,
+                        "reff_id": user.reff_id
+                    }
+                }, status=status.HTTP_201_CREATED)
+        except Exception as e:
+            return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
 
 class UserProfileView(APIView):
     permission_classes = [IsAuthenticated]
@@ -104,6 +174,8 @@ class UserListView(generics.ListAPIView):
     serializer_class = UserListSerializer
     permission_classes = [IsAdminUser]
 
+
+
 class UserUpdateView(generics.RetrieveUpdateAPIView):
     queryset = User.objects.all()
     serializer_class = UserListSerializer
@@ -113,68 +185,80 @@ class UserUpdateView(generics.RetrieveUpdateAPIView):
         user = self.get_object()
         data = request.data
 
-        # ১. রেফারেল আপডেট
-        reff_id_input = data.get('reff_id_input')
-        if reff_id_input:
-            referrer = User.objects.filter(reff_id=reff_id_input).first()
-            if referrer:
-                user.referred_by = referrer
-            else:
-                return Response({"error": "Invalid Referral ID"}, status=status.HTTP_400_BAD_REQUEST)
+        try:
+            with transaction.atomic():
+                # 1. Update Referrer
+                reff_id_input = data.get('reff_id_input')
+                if reff_id_input:
+                    referrer = User.objects.filter(reff_id=reff_id_input).first()
+                    if referrer:
+                        user.referred_by = referrer
+                    else:
+                        return Response({"error": "Invalid Referral ID"}, status=status.HTTP_400_BAD_REQUEST)
 
-        # ২. প্লেসমেন্ট আপডেট
-        plc_id_input = data.get('placement_id_input')
-        manual_position = data.get('position')
+                # 2. Smart Placement Logic
+                plc_id_input = data.get('placement_id_input')
+                manual_position = data.get('position')
 
-        if plc_id_input:
-            placer = User.objects.filter(placement_id=plc_id_input).first()
-            if placer:
-                user.placement_under = placer
-                if manual_position in ['left', 'right']:
-                    occupied = User.objects.filter(placement_under=placer, position=manual_position).exclude(id=user.id).exists()
+                if plc_id_input:
+                    target_parent = User.objects.filter(placement_id=plc_id_input).first()
+                    if not target_parent:
+                        return Response({"error": "Invalid Placement ID"}, status=status.HTTP_400_BAD_REQUEST)
+
+                    if manual_position in ['left', 'right']:
+                        occupied = User.objects.filter(placement_under=target_parent, position=manual_position).exclude(id=user.id).exists()
+                        
+                        if not occupied:
+                            user.placement_under = target_parent
+                            user.position = manual_position
+                        else:
+                            # Fallback to Auto-placement if position is occupied
+                            final_parent, final_pos = find_auto_placement(target_parent)
+                            user.placement_under = final_parent
+                            user.position = final_pos
+                    else:
+                        # Auto-placement if no position provided
+                        final_parent, final_pos = find_auto_placement(target_parent)
+                        user.placement_under = final_parent
+                        user.position = final_pos
+                
+                elif manual_position and user.placement_under:
+                    occupied = User.objects.filter(placement_under=user.placement_under, position=manual_position).exclude(id=user.id).exists()
                     if occupied:
-                        return Response({"error": f"{manual_position} side is already occupied under this placement ID"}, status=status.HTTP_400_BAD_REQUEST)
+                        return Response({"error": f"{manual_position} side is already occupied"}, status=status.HTTP_400_BAD_REQUEST)
                     user.position = manual_position
-            else:
-                return Response({"error": "Invalid Placement ID"}, status=status.HTTP_400_BAD_REQUEST)
-        
-        elif manual_position and user.placement_under:
-            occupied = User.objects.filter(placement_under=user.placement_under, position=manual_position).exclude(id=user.id).exists()
-            if occupied:
-                return Response({"error": f"{manual_position} side is already occupied"}, status=status.HTTP_400_BAD_REQUEST)
-            user.position = manual_position
 
-        # ৩. স্ট্যাটাস আপডেট লজিক
-        old_status = user.status
-        new_status = data.get('status')
-        if new_status:
-            user.status = new_status
+                # 3. Status and Commission
+                old_status = user.status
+                new_status = data.get('status')
+                if new_status:
+                    user.status = new_status
 
-        user.save() 
+                user.save() 
 
-        # কমিশন প্রসেসিং
-        if old_status == 'inactive' and user.status == 'active':
-            from accounts.services import calculate_commission
-            calculate_commission(user)
+                if old_status == 'inactive' and user.status == 'active':
+                    calculate_commission(user)
 
-        # ট্রি রি-ক্যালকুলেশন কল করা
-        self.recalculate_tree_counts()
+                # 4. Global Tree Recalculation
+                self.recalculate_tree_counts()
 
-        # ডাটা রিফ্রেশ করে রিটার্ন করা
+        except Exception as e:
+            return Response({"error": f"Database Error: {str(e)}"}, status=status.HTTP_400_BAD_REQUEST)
+
         user.refresh_from_db()
         serializer = self.get_serializer(user)
         return Response(serializer.data)
 
-    # এই মেথডটি অবশ্যই update মেথডের নিচে এবং একই লেভেলের ইনডেন্টেশনে থাকতে হবে
     def recalculate_tree_counts(self):
-        from accounts.services import update_user_rank
+        """
+        Recalculates counts and ranks for the entire network
+        """
         users = User.objects.all()
-        
-        # সব ইউজারের কাউন্ট রিসেট (নতুন করে গণনার জন্য)
         users.update(left_count=0, right_count=0, total_left=0, total_right=0)
         
-        # বটম-আপ অ্যাপ্রোচে ট্রি আপডেট (সিম্পল লজিক)
-        for u in User.objects.exclude(placement_under__isnull=True):
+        active_users_with_parent = User.objects.exclude(placement_under__isnull=True)
+        
+        for u in active_users_with_parent:
             curr = u
             while curr.placement_under:
                 parent = curr.placement_under
@@ -184,10 +268,10 @@ class UserUpdateView(generics.RetrieveUpdateAPIView):
                 elif curr.position == 'right':
                     parent.right_count += 1
                     parent.total_right += 1
+                
                 parent.save()
                 curr = parent
         
-        # সব ইউজারের র‍্যাঙ্ক আপডেট
         for u in User.objects.all():
             update_user_rank(u)
 # --- MLM & BINARY TREE ---

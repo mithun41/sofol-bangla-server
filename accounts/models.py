@@ -10,6 +10,7 @@ class User(AbstractUser):
     profile_picture = models.ImageField(upload_to='profile_pics/', null=True, blank=True)
     reff_id = models.CharField(max_length=12, unique=True, blank=True)
     placement_id = models.CharField(max_length=12, unique=True, blank=True)
+    division = models.CharField(max_length=100, blank=True, null=True)
     
     position = models.CharField(max_length=10, choices=[('left', 'Left'), ('right', 'Right')], null=True, blank=True)
     left_count = models.IntegerField(default=0)

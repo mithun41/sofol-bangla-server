@@ -100,3 +100,30 @@ def calculate_commission(user):
         ref.save()
     
     distribute_binary_matching(user)
+    
+from collections import deque
+
+def find_auto_placement(referrer_node):
+    """
+    Breadth-First Search (BFS) ব্যবহার করে রেফারারের নিচে প্রথম ফাঁকা জায়গা খুঁজে বের করবে।
+    """
+    queue = deque([referrer_node])
+    
+    while queue:
+        current = queue.popleft()
+        
+        # বাম পাশ চেক
+        left_child = User.objects.filter(placement_under=current, position='left').first()
+        if not left_child:
+            return current, 'left'
+        else:
+            queue.append(left_child)
+            
+        # ডান পাশ চেক
+        right_child = User.objects.filter(placement_under=current, position='right').first()
+        if not right_child:
+            return current, 'right'
+        else:
+            queue.append(right_child)
+            
+    return None, None
