@@ -4,6 +4,7 @@ from django.db import models, transaction
 from django.utils import timezone
 from django.conf import settings
 
+
 def generate_order_id():
     """ইউনিক অর্ডার আইডি জেনারেট করার ফাংশন (যেমন: SB-20260205-A7B2)"""
     date_str = timezone.now().strftime('%Y%m%d')

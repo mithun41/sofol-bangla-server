@@ -3,10 +3,21 @@ from django.db import models
 class Category(models.Model):
     name = models.CharField(max_length=100, unique=True)
     slug = models.SlugField(max_length=120, unique=True, blank=True)
-    # এই লাইনটি যোগ করুন
     image = models.ImageField(upload_to='categories/', null=True, blank=True)
+    
+    # সাব-ক্যাটেগরির জন্য এই লাইনটি যোগ কর
+    parent = models.ForeignKey(
+        'self', 
+        on_delete=models.CASCADE, 
+        null=True, 
+        blank=True, 
+        related_name='subcategories'
+    )
 
     def __str__(self):
+        # যদি প্যারেন্ট থাকে তবে "Electronics > Mobile" এভাবে দেখাবে
+        if self.parent:
+            return f"{self.parent.name} > {self.name}"
         return self.name
 
     class Meta:
