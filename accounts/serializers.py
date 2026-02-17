@@ -81,7 +81,8 @@ class BonusLogSerializer(serializers.ModelSerializer):
         fields = ['id', 'user_username', 'amount', 'reason', 'timestamp']
 
 class WithdrawalSerializer(serializers.ModelSerializer):
+    username = serializers.CharField(source="user.username", read_only=True)
     class Meta:
         model = WithdrawalRequest
-        fields = ['id', 'amount', 'method', 'account_number', 'status', 'created_at']
+        fields = ['id', 'amount','username', 'method', 'account_number', 'status', 'created_at']
         read_only_fields = ['status', 'created_at']
