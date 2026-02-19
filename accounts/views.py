@@ -22,23 +22,32 @@ from .serializers import (
 
 # --- USER AUTH & PROFILE ---
 
+
 class RegisterView(generics.CreateAPIView):
     serializer_class = RegisterSerializer
     permission_classes = [AllowAny]
     authentication_classes = []
 
     def create(self, request, *args, **kwargs):
+        # ১. সিরিয়ালাইজার দিয়ে ডাটা ভ্যালিডেট করা (Username/Email checks)
+        serializer = self.get_serializer(data=request.data)
+        if not serializer.is_valid():
+            # ডুপ্লিকেট ইউজারনেম বা ইমেইল থাকলে এখান থেকেই এরর যাবে
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
         data = request.data
         user_division = data.get('division', '') 
-        
         reff_id = data.get('reff_id')
         referrer = None
+
+        # ২. রেফারেল আইডি চেক
         if reff_id:
             try:
                 referrer = User.objects.get(reff_id=reff_id)
             except User.DoesNotExist:
-                return Response({"error": "Invalid Referral ID"}, status=status.HTTP_400_BAD_REQUEST)
+                return Response({"reff_id": ["Invalid Referral ID. Please check again."]}, status=status.HTTP_400_BAD_REQUEST)
 
+        # ৩. প্লেসমেন্ট এবং পজিশন লজিক
         placement_id = data.get('placement_id')
         position = data.get('position')
         final_parent = None
@@ -47,24 +56,32 @@ class RegisterView(generics.CreateAPIView):
         if placement_id and position:
             try:
                 target_parent = User.objects.get(placement_id=placement_id)
+                # পজিশন কি খালি আছে?
                 if not User.objects.filter(placement_under=target_parent, position=position).exists():
                     final_parent, final_pos = target_parent, position
                 else:
+                    # অটো প্লেসমেন্ট লজিক (নিশ্চিত কর এই ফাংশনটি ইম্পোর্ট করা আছে)
                     final_parent, final_pos = find_auto_placement_with_division(target_parent, user_division)
             except User.DoesNotExist:
-                return Response({"error": "Invalid Placement ID"}, status=400)
+                return Response({"placement_id": ["Invalid Placement ID."]}, status=status.HTTP_400_BAD_REQUEST)
+        
         elif placement_id:
             try:
                 target_parent = User.objects.get(placement_id=placement_id)
                 final_parent, final_pos = find_auto_placement_with_division(target_parent, user_division)
             except User.DoesNotExist:
-                return Response({"error": "Invalid Placement ID"}, status=400)
+                return Response({"placement_id": ["Invalid Placement ID."]}, status=status.HTTP_400_BAD_REQUEST)
+        
         elif referrer:
             final_parent, final_pos = find_auto_placement_with_division(referrer, user_division)
+        
         else:
+            # রুট ইউজার (অ্যাডমিন) চেক
             root_user = User.objects.filter(is_superuser=True).first()
-            final_parent, final_pos = (find_auto_placement_with_division(root_user, user_division)) if root_user else (None, None)
+            if root_user:
+                final_parent, final_pos = find_auto_placement_with_division(root_user, user_division)
 
+        # ৪. ইউজার তৈরি করা (Atomic Transaction)
         try:
             with transaction.atomic():
                 user = User.objects.create_user(
@@ -79,6 +96,7 @@ class RegisterView(generics.CreateAPIView):
                     position=final_pos,
                     status='inactive' 
                 )
+                
                 return Response({
                     "message": "User registered successfully!",
                     "user_info": {
@@ -89,8 +107,10 @@ class RegisterView(generics.CreateAPIView):
                         "reff_id": user.reff_id
                     }
                 }, status=status.HTTP_201_CREATED)
+
         except Exception as e:
-            return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
+            # অন্যান্য যেকোনো টেকনিক্যাল এরর
+            return Response({"general": [str(e)]}, status=status.HTTP_400_BAD_REQUEST)
 
 class UserProfileView(APIView):
     permission_classes = [IsAuthenticated]
@@ -126,11 +146,30 @@ class UserProfileView(APIView):
 
 class MyTokenObtainPairSerializer(TokenObtainPairSerializer):
     def validate(self, attrs):
+        # ডিফল্ট refresh এবং access টোকেন জেনারেট করা
         data = super().validate(attrs)
-        data['username'] = self.user.username
-        data['role'] = self.user.role
-        data['name'] = self.user.name if self.user.name else self.user.username
-        data['profile_picture'] = self.user.profile_picture.url if self.user.profile_picture else None
+        user = self.user
+
+        # userinfo অবজেক্ট এর ভেতরে সব ডাটা ঢুকিয়ে দেওয়া
+        data['userinfo'] = {
+            "name": user.name if user.name else user.username,
+            "username": user.username,
+            "email": user.email,
+            "phone": user.phone,
+            "role": user.role,
+            "profile_picture": user.profile_picture.url if user.profile_picture else None,
+            "balance": float(user.balance),
+            "points": user.points,
+            "left_count": user.left_count,
+            "right_count": user.right_count,
+            "total_left": user.total_left,
+            "total_right": user.total_right,
+            "reff_id": user.reff_id,
+            "placement_id": user.placement_id,
+            "status": user.status,
+            "star_level": user.star_level
+        }
+
         return data
 
 class MyTokenObtainPairView(TokenObtainPairView):

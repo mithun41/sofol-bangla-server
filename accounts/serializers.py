@@ -1,11 +1,52 @@
 from rest_framework import serializers
+from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
 from .models import BonusLog, User, WithdrawalRequest
-from .services import find_auto_placement_with_division # services থেকে ফাংশনটি ইমপোর্ট করবি
+from .services import find_auto_placement_with_division
+
+# ১. লগইন করার সময় সব ডাটা একসাথে পাঠানোর জন্য কাস্টম সিরিয়ালাইজার
+class MyTokenObtainPairSerializer(TokenObtainPairSerializer):
+    def validate(self, attrs):
+        data = super().validate(attrs)
+        user = self.user
+
+        # তোর দেওয়া ফরম্যাট অনুযায়ী ডাটা অ্যাড করা
+        data['username'] = user.username
+        data['role'] = user.role
+        data['name'] = user.name
+        # প্রোফাইল পিকচার থাকলে ফুল URL দিবে, না থাকলে None
+        data['profile_picture'] = user.profile_picture.url if user.profile_picture else None
+        
+        # এক্সট্রা ইনফরমেশন যা ড্যাশবোর্ডে লাগবে
+        data['email'] = user.email
+        data['phone'] = user.phone
+        data['balance'] = float(user.balance)
+        data['points'] = user.points
+        data['left_count'] = user.left_count
+        data['right_count'] = user.right_count
+        data['total_left'] = user.total_left
+        data['total_right'] = user.total_right
+        data['reff_id'] = user.reff_id
+        data['placement_id'] = user.placement_id
+        data['status'] = user.status
+        data['star_level'] = user.star_level
+        
+        return data
+
+# ২. ইউজার প্রোফাইল দেখার বা আপডেট করার সিরিয়ালাইজার
+class UserProfileSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = User
+        fields = [
+            'name', 'username', 'email', 'phone', 'role', 
+            'profile_picture', 'balance', 'points', 'left_count', 
+            'right_count', 'total_left', 'total_right', 'reff_id', 
+            'placement_id', 'status', 'star_level'
+        ]
+        read_only_fields = ['username', 'email', 'balance', 'points', 'reff_id', 'placement_id', 'role']
 
 class UserListSerializer(serializers.ModelSerializer):
     reff_id_input = serializers.CharField(write_only=True, required=False, allow_blank=True)
     placement_id_input = serializers.CharField(write_only=True, required=False, allow_blank=True)
-    
     referred_by_username = serializers.ReadOnlyField(source='referred_by.username')
     placement_under_username = serializers.ReadOnlyField(source='placement_under.username')
 
@@ -16,11 +57,10 @@ class UserListSerializer(serializers.ModelSerializer):
             'points', 'balance', 'position', 'left_count', 'right_count',
             'referred_by_username', 'placement_under_username', 
             'reff_id_input', 'placement_id_input',
-            'status', 'star_level', 'role', 'createdAt', 'division' # division যোগ করলাম
+            'status', 'star_level', 'role', 'createdAt', 'division'
         )
 
 class RegisterSerializer(serializers.ModelSerializer):
-    # ফ্রন্টএন্ড থেকে আসা ইনপুট ফিল্ড
     reff_code_input = serializers.CharField(write_only=True, required=False, allow_blank=True)
     placement_id_input = serializers.CharField(write_only=True, required=False, allow_blank=True)
     position_input = serializers.CharField(write_only=True, required=False, allow_blank=True)
@@ -39,40 +79,29 @@ class RegisterSerializer(serializers.ModelSerializer):
         pos_input = validated_data.pop('position_input', None)
         user_division = validated_data.get('division')
 
-        # ১. ইউজার ক্রিয়েট করা
         user = User.objects.create_user(**validated_data)
 
-        # ২. রেফারার সেট করা
-        referrer = None
         if reff_code:
             referrer = User.objects.filter(reff_id=reff_code).first()
             user.referred_by = referrer
 
-        # ৩. প্লেসমেন্ট লজিক
         if placement_code:
-            # ক) ম্যানুয়াল প্লেসমেন্ট (যদি ইউজার নিজে আইডি দেয়)
             placer = User.objects.filter(placement_id=placement_code).first()
             if placer:
                 user.placement_under = placer
-                # যদি পজিশন দেওয়া থাকে তবে সেটা নিবে, নাহলে অটোমেটিক খালি জায়গা নিবে
                 if pos_input in ['left', 'right']:
                     user.position = pos_input
                 else:
                     existing_left = User.objects.filter(placement_under=placer, position='left').exists()
                     user.position = 'left' if not existing_left else 'right'
-        
-        elif referrer:
-            # খ) অটো প্লেসমেন্ট (ডিভিশন অনুযায়ী)
-            # এই ফাংশনটা তোর services.py এ থাকবে যা আমরা আগে আলোচনা করেছি
-            parent, pos = find_auto_placement_with_division(referrer, user_division)
+        elif user.referred_by:
+            parent, pos = find_auto_placement_with_division(user.referred_by, user_division)
             if parent:
                 user.placement_under = parent
                 user.position = pos
 
         user.save()
         return user
-
-
 
 class BonusLogSerializer(serializers.ModelSerializer):
     user_username = serializers.ReadOnlyField(source='user.username')
