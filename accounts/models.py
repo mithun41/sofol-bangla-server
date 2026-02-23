@@ -33,30 +33,48 @@ class User(AbstractUser):
     createdAt = models.DateTimeField(auto_now_add=True, null=True, blank=True)
 
     def save(self, *args, **kwargs):
-        # আইডি জেনারেশন
+        # আইডি জেনারেশন (আগের মতো)
         if not self.reff_id:
             self.reff_id = "REF" + str(uuid.uuid4().hex[:6].upper())
         if not self.placement_id:
             self.placement_id = "PLC" + str(uuid.uuid4().hex[:6].upper())
-        
-        # অটো-অ্যাক্টিভেশন লজিক
+
         is_becoming_active = False
-        # এখানে ডাটাবেস থেকে পুরনো স্ট্যাটাস চেক করা নিরাপদ
+        added_points = 0
+
         if self.pk:
             old_user = User.objects.get(pk=self.pk)
+            
+            # ১. নতুন পয়েন্ট যোগ হয়েছে কি না চেক (ফান্ডে টাকা পাঠানোর জন্য)
+            if self.points > old_user.points:
+                added_points = self.points - old_user.points
+            
+            # ২. অ্যাক্টিভেশন কন্ডিশন চেক
+            # যদি আগে ইনাক্টিভ থাকে এবং এখন ১০০০ পয়েন্ট বা তার বেশি হয়
             if old_user.status == 'inactive' and (self.points >= 1000 or self.status == 'active'):
                 is_becoming_active = True
                 self.status = 'active'
-        elif self.status == 'active' or self.points >= 1000:
-             is_becoming_active = True
-             self.status = 'active'
+                self.points = 0  # মামা, তোর রিকোয়ারমেন্ট: একটিভ হলে পয়েন্ট ০ হয়ে যাবে
+        else:
+            # নতুন ইউজার তৈরির সময় যদি পয়েন্ট থাকে
+            added_points = self.points
+            if self.points >= 1000 or self.status == 'active':
+                is_becoming_active = True
+                self.status = 'active'
+                self.points = 0
 
         if self.is_superuser:
             self.role = 'admin'
 
+        # মেইন সেভ কল
         super().save(*args, **kwargs)
 
-        # কমিশন শুধুমাত্র একবারই ট্রিগার হবে
+        # ৩. ফান্ড ডিস্ট্রিবিউশন: ইউজার একটিভ হোক বা না হোক, পয়েন্ট বাড়লে টাকা ফান্ডে যাবে
+        if added_points > 0:
+            from accounts.services import distribute_money_to_funds
+            distribute_money_to_funds(added_points)
+
+        # ৪. বোনাস ডিস্ট্রিবিউশন: শুধুমাত্র যখন ইনাক্টিভ থেকে একটিভ হবে
         if is_becoming_active:
             from accounts.services import calculate_commission
             calculate_commission(self)
@@ -75,3 +93,30 @@ class WithdrawalRequest(models.Model):
     account_number = models.CharField(max_length=20)
     status = models.CharField(max_length=10, choices=STATUS_CHOICES, default='pending')
     created_at = models.DateTimeField(auto_now_add=True)
+    
+# models.py এ যোগ কর
+
+class GlobalFund(models.Model):
+    referral_fund = models.DecimalField(max_digits=15, decimal_places=2, default=0.00)
+    matching_fund = models.DecimalField(max_digits=15, decimal_places=2, default=0.00)
+    rank_reward_fund = models.DecimalField(max_digits=15, decimal_places=2, default=0.00)
+    tour_fund = models.DecimalField(max_digits=15, decimal_places=2, default=0.00)
+    leadership_fund = models.DecimalField(max_digits=15, decimal_places=2, default=0.00)
+    company_fund = models.DecimalField(max_digits=15, decimal_places=2, default=0.00)
+
+    class Meta:
+        verbose_name = "Global Fund Balance"
+
+    def __str__(self):
+        return "Global Fund Balances"
+
+class FundLog(models.Model):
+    TRANSACTION_TYPES = (('inbound', 'Money In'), ('outbound', 'Money Out'))
+    fund_type = models.CharField(max_length=50) # referral, matching, etc.
+    amount = models.DecimalField(max_digits=12, decimal_places=2)
+    transaction_type = models.CharField(max_length=10, choices=TRANSACTION_TYPES)
+    reason = models.CharField(max_length=255)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return f"{self.transaction_type} - {self.fund_type}: {self.amount}"

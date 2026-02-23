@@ -2,6 +2,10 @@ from rest_framework import serializers
 from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
 from .models import BonusLog, User, WithdrawalRequest
 from .services import find_auto_placement_with_division
+from decimal import Decimal
+from django.db import transaction
+from .models import GlobalFund, FundLog
+
 
 # ১. লগইন করার সময় সব ডাটা একসাথে পাঠানোর জন্য কাস্টম সিরিয়ালাইজার
 class MyTokenObtainPairSerializer(TokenObtainPairSerializer):
@@ -115,3 +119,56 @@ class WithdrawalSerializer(serializers.ModelSerializer):
         model = WithdrawalRequest
         fields = ['id', 'amount','username', 'method', 'account_number', 'status', 'created_at']
         read_only_fields = ['status', 'created_at']
+        
+
+# ১. ফান্ডে টাকা জমানোর লজিক (১০০০ পয়েন্ট = ৪০০০ টাকা হিসেবে)
+def distribute_money_to_funds(points):
+    total_money = Decimal(points) * 4
+    fund, created = GlobalFund.objects.get_or_create(id=1)
+    
+    # তোর দেওয়া ক্যালকুলেশন অনুযায়ী পারসেন্টেজ
+    distributions = {
+        'referral_fund': total_money * Decimal('0.125'),  # ১২.৫%
+        'matching_fund': total_money * Decimal('0.10'),   # ১০%
+        'rank_reward_fund': total_money * Decimal('0.125'),# ১২.৫%
+        'tour_fund': total_money * Decimal('0.25'),       # ২৫%
+        'leadership_fund': total_money * Decimal('0.125'), # ১২.৫%
+        'company_fund': total_money * Decimal('0.275'),    # ২৭.৫%
+    }
+
+    with transaction.atomic():
+        for field, amount in distributions.items():
+            current_val = getattr(fund, field)
+            setattr(fund, field, current_val + amount)
+            FundLog.objects.create(
+                fund_type=field, amount=amount, 
+                transaction_type='inbound', reason=f"Distribution from {points} points"
+            )
+        fund.save()
+
+# ২. ফান্ড থেকে টাকা কাটানোর লজিক (ব্যাকআপ হিসেবে কোম্পানি ফান্ডসহ)
+def deduct_from_fund(primary_fund_name, amount):
+    fund, created = GlobalFund.objects.get_or_create(id=1)
+    primary_balance = getattr(fund, primary_fund_name)
+    company_balance = fund.company_fund
+    
+    amount = Decimal(amount)
+
+    with transaction.atomic():
+        if primary_balance >= amount:
+            # যদি মেইন ফান্ডে টাকা থাকে
+            setattr(fund, primary_fund_name, primary_balance - amount)
+            FundLog.objects.create(fund_type=primary_fund_name, amount=amount, transaction_type='outbound', reason="Bonus distribution")
+        elif (primary_balance + company_balance) >= amount:
+            # যদি মেইন ফান্ড + কোম্পানি ফান্ড মিলায়া হয়
+            remaining = amount - primary_balance
+            setattr(fund, primary_fund_name, 0)
+            fund.company_fund -= remaining
+            FundLog.objects.create(fund_type=primary_fund_name, amount=primary_balance, transaction_type='outbound', reason="Partial bonus")
+            FundLog.objects.create(fund_type='company_fund', amount=remaining, transaction_type='outbound', reason="Bonus backup support")
+        else:
+            # টাকা নাই!
+            return False 
+        
+        fund.save()
+        return True

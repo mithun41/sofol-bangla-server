@@ -2,6 +2,7 @@ from django.urls import path
 from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView
 
 from .views import (
+    AdminDashboardStatsView,
     BonusLogListView,
     MyTokenObtainPairView,
     RegisterView, 
@@ -36,4 +37,5 @@ urlpatterns = [
     path('withdraw-request/', WithdrawalListCreateView.as_view(), name='withdraw-request'),
     path('admin/withdrawals/', admin_withdrawal_list, name='admin-withdrawal-list'),
     path('admin/withdrawals/<int:pk>/handle/', admin_approve_withdraw, name='admin-withdrawal-handle'),
+    path('admin/stats/', AdminDashboardStatsView.as_view(), name='admin-stats'),
 ]

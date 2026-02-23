@@ -1,3 +1,4 @@
+from datetime import datetime
 from decimal import Decimal
 from django.db import transaction
 from rest_framework import generics, status, serializers
@@ -14,11 +15,13 @@ from accounts.services import (
     update_user_rank, 
     find_auto_placement_with_division
 )
-from .models import BonusLog, User, WithdrawalRequest
+from .models import BonusLog, FundLog, GlobalFund, User, WithdrawalRequest
 from .serializers import (
     RegisterSerializer, UserListSerializer, WithdrawalSerializer, 
     BonusLogSerializer
 )
+from django.db.models import Sum
+from .models import FundLog # এটা ইম্পোর্ট করা নিশ্চিত কর
 
 # --- USER AUTH & PROFILE ---
 
@@ -149,6 +152,14 @@ class MyTokenObtainPairSerializer(TokenObtainPairSerializer):
         # ডিফল্ট refresh এবং access টোকেন জেনারেট করা
         data = super().validate(attrs)
         user = self.user
+        request = self.context.get('request') # রিকোয়েস্ট অবজেক্টটি নেওয়া
+
+        # প্রোফাইল পিকচারের ফুল লিঙ্ক তৈরি করা
+        if user.profile_picture:
+            # যদি রিকোয়েস্ট থাকে তবে ফুল ইউআরএল বানাবে, নাহলে রিলেটিভটাই দিবে
+            profile_pic_url = request.build_absolute_uri(user.profile_picture.url) if request else user.profile_picture.url
+        else:
+            profile_pic_url = None
 
         # userinfo অবজেক্ট এর ভেতরে সব ডাটা ঢুকিয়ে দেওয়া
         data['userinfo'] = {
@@ -157,7 +168,7 @@ class MyTokenObtainPairSerializer(TokenObtainPairSerializer):
             "email": user.email,
             "phone": user.phone,
             "role": user.role,
-            "profile_picture": user.profile_picture.url if user.profile_picture else None,
+            "profile_picture": profile_pic_url,
             "balance": float(user.balance),
             "points": user.points,
             "left_count": user.left_count,
@@ -339,3 +350,61 @@ def admin_approve_withdraw(request, pk):
         return Response({"message": f"Successfully {action}ed"})
     except WithdrawalRequest.DoesNotExist:
         return Response({"error": "Not found"}, status=404)
+    
+
+
+
+
+
+
+class AdminDashboardStatsView(APIView):
+    """
+    অ্যাডমিন ড্যাশবোর্ডের জন্য এক্সেকিউটিভ সামারি এবং গ্লোবাল ফান্ড স্ট্যাটাস প্রদান করে।
+    """
+    permission_classes = [IsAdminUser]
+
+    def get(self, request):
+        # ১. গ্লোবাল ফান্ডের লেটেস্ট রেকর্ড নেওয়া
+        fund = GlobalFund.objects.first()
+        
+        # ২. বর্তমান মাস ও বছর নির্ধারণ করা
+        current_month = datetime.now().month
+        current_year = datetime.now().year
+
+        # ৩. মাসিক ইনকাম (Inflow) ক্যালকুলেশন
+        # FundLog মডেলে transaction_type 'inbound' হওয়া চাই
+        monthly_inflow = FundLog.objects.filter(
+            transaction_type='inbound',
+            created_at__month=current_month,
+            created_at__year=current_year
+        ).aggregate(total=Sum('amount'))['total'] or Decimal('0.00')
+
+        # ৪. মাসিক আউটকাম (Outflow) ক্যালকুলেশন
+        # FundLog মডেলে transaction_type 'outbound' হওয়া চাই
+        monthly_outflow = FundLog.objects.filter(
+            transaction_type='outbound',
+            created_at__month=current_month,
+            created_at__year=current_year
+        ).aggregate(total=Sum('amount'))['total'] or Decimal('0.00')
+
+        # ৫. ফাইনাল রেসপন্স ডাটা স্ট্রাকচার (তোর ফ্রন্টএন্ডের সাথে মিল রেখে)
+        data = {
+            "summary": {
+                "total_users": User.objects.count(),
+                "active_users": User.objects.filter(status='active').count(),
+                "pending_withdrawals": WithdrawalRequest.objects.filter(status='pending').count(),
+                "monthly_revenue": float(monthly_inflow),
+                "monthly_payout": float(monthly_outflow),
+                "net_profit": float(monthly_inflow - monthly_outflow)
+            },
+            "funds": {
+                "referral": float(fund.referral_fund) if fund else 0.0,
+                "matching": float(fund.matching_fund) if fund else 0.0,
+                "rank_reward": float(fund.rank_reward_fund) if fund else 0.0,
+                "tour": float(fund.tour_fund) if fund else 0.0,
+                "leadership": float(fund.leadership_fund) if fund else 0.0,
+                "company": float(fund.company_fund) if fund else 0.0,
+            }
+        }
+
+        return Response(data)
