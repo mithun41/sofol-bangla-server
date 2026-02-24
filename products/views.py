@@ -31,28 +31,39 @@ class ProductViewSet(viewsets.ModelViewSet):
         return [permissions.AllowAny()]
 
 # --- নতুন কার্ট সিঙ্ক এপিআই ---
+
+
 class CartSyncView(APIView):
     """
-    ফ্রন্টএন্ড থেকে প্রোডাক্ট আইডি লিস্ট নিয়ে লেটেস্ট ডাটা (প্রাইস, স্টক) ফেরত দেয়।
+    ফ্রন্টএন্ড থেকে প্রোডাক্ট আইডি লিস্ট নিয়ে লেটেস্ট ডাটা (প্রাইস, স্টক) ফেরত দেয়।
     """
-    permission_classes = [permissions.AllowAny()] # যে কেউ কার্ট চেক করতে পারবে
+    permission_classes = [permissions.AllowAny] # ব্র্যাকেট বাদ দেওয়া হয়েছে
 
     def post(self, request):
+        # ডাটা নেওয়া
         product_ids = request.data.get('ids', [])
+        
+        if not isinstance(product_ids, list):
+            return Response({"error": "ids must be a list"}, status=status.HTTP_400_BAD_REQUEST)
+
         if not product_ids:
             return Response([], status=status.HTTP_200_OK)
         
-        # ডাটাবেস থেকে শুধু কার্টে থাকা প্রোডাক্টগুলো ফিল্টার করা
+        # ডাটাবেস থেকে প্রোডাক্ট ফিল্টার
         products = Product.objects.filter(id__in=product_ids)
         
-        # ডাটা রেডি করা (সিরিয়ালাইজার ব্যবহার করলে আরও ভালো হয়)
         data = []
         for p in products:
+            # ইমেজ ইউআরএল হ্যান্ডেলিং
+            image_url = None
+            if p.image:
+                image_url = request.build_absolute_uri(p.image.url)
+
             data.append({
                 "id": p.id,
                 "name": p.name,
                 "price": float(p.price),
-                "image": request.build_absolute_uri(p.image.url) if p.image else None,
+                "image": image_url,
                 "point_value": p.point_value or 0,
                 "stock_status": "in_stock" if (hasattr(p, 'stock') and p.stock > 0) else "available"
             })
