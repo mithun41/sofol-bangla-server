@@ -34,6 +34,7 @@ class Order(models.Model):
     phone = models.CharField(max_length=15)
     address = models.TextField()
     city = models.CharField(max_length=50)
+    total_pv = models.PositiveIntegerField(default=0)
     
     # Amounts
     subtotal = models.DecimalField(max_digits=12, decimal_places=2)
