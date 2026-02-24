@@ -3,7 +3,8 @@ from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework.decorators import action
 from .models import Product, Category
-from .serializers import ProductSerializer, CategorySerializer
+from .serializers import CartSerializer, ProductSerializer, CategorySerializer
+from .models import Product, Category, Cart 
 
 class CategoryViewSet(viewsets.ModelViewSet):
     queryset = Category.objects.all()
@@ -69,3 +70,38 @@ class CartSyncView(APIView):
             })
             
         return Response(data, status=status.HTTP_200_OK)
+    
+    
+
+
+
+
+
+class CartViewSet(viewsets.ModelViewSet):
+    serializer_class = CartSerializer
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get_queryset(self):
+        # শুধুমাত্র নিজের কার্ট আইটেম দেখবে
+        return Cart.objects.filter(user=self.request.user)
+
+    def perform_create(self, serializer):
+        product = serializer.validated_data.get('product')
+        quantity = serializer.validated_data.get('quantity', 1)
+        
+        # ১. চেক করা যে এই ইউজারের কার্টে এই প্রোডাক্ট অলরেডি আছে কি না
+        cart_item = Cart.objects.filter(user=self.request.user, product=product).first()
+
+        if cart_item:
+            # ২. যদি থাকে, তবে কোয়ান্টিটি বাড়িয়ে দাও
+            cart_item.quantity += quantity
+            cart_item.save()
+        else:
+            # ৩. না থাকলে নতুন করে সেভ করো
+            serializer.save(user=self.request.user)
+
+    @action(detail=False, methods=['delete'])
+    def clear(self, request):
+        """পুরো কার্ট খালি করার জন্য: /api/products/cart/clear/"""
+        Cart.objects.filter(user=request.user).delete()
+        return Response({"message": "Cart cleared successfully"}, status=status.HTTP_204_NO_CONTENT)

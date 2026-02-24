@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from .models import Category, Product
+from .models import Category, Product, Cart
 
 class CategorySerializer(serializers.ModelSerializer):
     # ইমেজ ফিল্ডটি আগের মতোই থাকল
@@ -27,3 +27,30 @@ class ProductSerializer(serializers.ModelSerializer):
     class Meta:
         model = Product
         fields = '__all__'
+        
+class CartSerializer(serializers.ModelSerializer):
+    product_name = serializers.ReadOnlyField(source='product.name')
+    product_price = serializers.ReadOnlyField(source='product.price')
+    # পিভি (PV) দেখানোর জন্য
+    product_pv = serializers.ReadOnlyField(source='product.point_value')
+    # ইমেজ ইউআরএল জেনারেট করার জন্য
+    product_image = serializers.SerializerMethodField()
+    subtotal = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Cart
+        fields = [
+            'id', 'product', 'product_name', 'product_price', 
+            'product_pv', 'product_image', 'quantity', 'subtotal'
+        ]
+        read_only_fields = ['user']
+
+    def get_product_image(self, obj):
+        request = self.context.get('request')
+        if obj.product.image:
+            # এটি স্লাশ বা ডোমেইনসহ ফুল ইউআরএল দিবে (যেমন: http://mithun41.../media/...)
+            return request.build_absolute_uri(obj.product.image.url)
+        return None
+
+    def get_subtotal(self, obj):
+        return obj.product.price * obj.quantity
