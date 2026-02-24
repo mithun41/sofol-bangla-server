@@ -31,9 +31,7 @@ class ProductSerializer(serializers.ModelSerializer):
 class CartSerializer(serializers.ModelSerializer):
     product_name = serializers.ReadOnlyField(source='product.name')
     product_price = serializers.ReadOnlyField(source='product.price')
-    # পিভি (PV) দেখানোর জন্য
     product_pv = serializers.ReadOnlyField(source='product.point_value')
-    # ইমেজ ইউআরএল জেনারেট করার জন্য
     product_image = serializers.SerializerMethodField()
     subtotal = serializers.SerializerMethodField()
 
@@ -46,11 +44,23 @@ class CartSerializer(serializers.ModelSerializer):
         read_only_fields = ['user']
 
     def get_product_image(self, obj):
+        # এরর ফিক্স: obj যদি ডিকশনারি হয় (POST রিকোয়েস্টের সময়)
+        product = obj['product'] if isinstance(obj, dict) else obj.product
+        
         request = self.context.get('request')
-        if obj.product.image:
-            # এটি স্লাশ বা ডোমেইনসহ ফুল ইউআরএল দিবে (যেমন: http://mithun41.../media/...)
-            return request.build_absolute_uri(obj.product.image.url)
+        if product and product.image:
+            if request:
+                return request.build_absolute_uri(product.image.url)
+            return product.image.url
         return None
 
     def get_subtotal(self, obj):
-        return obj.product.price * obj.quantity
+        # এরর ফিক্স: obj যদি ডিকশনারি হয়
+        if isinstance(obj, dict):
+            product = obj['product']
+            quantity = obj['quantity']
+        else:
+            product = obj.product
+            quantity = obj.quantity
+            
+        return product.price * quantity
