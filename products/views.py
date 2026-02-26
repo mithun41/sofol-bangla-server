@@ -35,37 +35,38 @@ class ProductViewSet(viewsets.ModelViewSet):
 
 
 class CartSyncView(APIView):
-    """
-    ফ্রন্টএন্ড থেকে প্রোডাক্ট আইডি লিস্ট নিয়ে লেটেস্ট ডাটা (প্রাইস, স্টক) ফেরত দেয়।
-    """
-    permission_classes = [permissions.AllowAny] # ব্র্যাকেট বাদ দেওয়া হয়েছে
+    permission_classes = [permissions.AllowAny]
 
     def post(self, request):
-        # ডাটা নেওয়া
         product_ids = request.data.get('ids', [])
-        
-        if not isinstance(product_ids, list):
-            return Response({"error": "ids must be a list"}, status=status.HTTP_400_BAD_REQUEST)
-
-        if not product_ids:
-            return Response([], status=status.HTTP_200_OK)
-        
-        # ডাটাবেস থেকে প্রোডাক্ট ফিল্টার
         products = Product.objects.filter(id__in=product_ids)
         
+        # ইউজার অ্যাক্টিভ কি না তা স্ট্রিং চেক করে নিশ্চিত করা
+        is_active = False
+        if request.user.is_authenticated:
+            u_status = ""
+            if hasattr(request.user, 'profile'):
+                u_status = getattr(request.user.profile, 'status', '').lower()
+            elif hasattr(request.user, 'status'):
+                u_status = getattr(request.user, 'status', '').lower()
+            
+            is_active = (u_status == 'active')
+
         data = []
         for p in products:
-            # ইমেজ ইউআরএল হ্যান্ডেলিং
-            image_url = None
-            if p.image:
-                image_url = request.build_absolute_uri(p.image.url)
+            image_url = request.build_absolute_uri(p.image.url) if p.image else None
+            base_price = float(p.price)
+            pv = float(p.point_value or 0)
+            
+            # ডিসকাউন্ট লজিক এপ্লাই
+            final_price = (base_price - pv) if is_active else base_price
 
             data.append({
                 "id": p.id,
                 "name": p.name,
-                "price": float(p.price),
+                "product_price": final_price,
                 "image": image_url,
-                "point_value": p.point_value or 0,
+                "product_pv": pv,
                 "stock_status": "in_stock" if (hasattr(p, 'stock') and p.stock > 0) else "available"
             })
             
@@ -82,22 +83,23 @@ class CartViewSet(viewsets.ModelViewSet):
     permission_classes = [permissions.IsAuthenticated]
 
     def get_queryset(self):
-        # শুধুমাত্র নিজের কার্ট আইটেম দেখবে
         return Cart.objects.filter(user=self.request.user)
+
+    # এই অংশটুকু মিসিং ছিল - যা ডিসকাউন্ট লজিককে রিকোয়েস্ট পাঠাবে
+    def get_serializer_context(self):
+        context = super().get_serializer_context()
+        context.update({"request": self.request})
+        return context
 
     def perform_create(self, serializer):
         product = serializer.validated_data.get('product')
         quantity = serializer.validated_data.get('quantity', 1)
-        
-        # ১. চেক করা যে এই ইউজারের কার্টে এই প্রোডাক্ট অলরেডি আছে কি না
         cart_item = Cart.objects.filter(user=self.request.user, product=product).first()
 
         if cart_item:
-            # ২. যদি থাকে, তবে কোয়ান্টিটি বাড়িয়ে দাও
             cart_item.quantity += quantity
             cart_item.save()
         else:
-            # ৩. না থাকলে নতুন করে সেভ করো
             serializer.save(user=self.request.user)
 
     @action(detail=False, methods=['delete'])
