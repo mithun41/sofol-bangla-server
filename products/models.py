@@ -28,14 +28,16 @@ class Category(models.Model):
         verbose_name_plural = "Categories"
 
 class Product(models.Model):
-    category = models.ForeignKey(Category, on_delete=models.CASCADE, related_name='products')
+    category = models.ForeignKey('Category', on_delete=models.CASCADE, related_name='products')
     name = models.CharField(max_length=255)
     description = models.TextField()
     
-    # এখানে দাম এবং পয়েন্টের লজিক হবে
-    purchase_price = models.DecimalField(max_digits=10, decimal_places=2, default=0.00) # কেনা দাম
-    price = models.DecimalField(max_digits=10, decimal_places=2) # বিক্রি দাম
-    point_value = models.DecimalField(max_digits=10, decimal_places=2, editable=False, default=0.00) # অটো ক্যালকুলেটেড
+    # কেনা দাম এবং বিক্রি দাম (টাকা-পয়সার জন্য DecimalField-ই সেরা)
+    purchase_price = models.DecimalField(max_digits=10, decimal_places=2, default=0.00) 
+    price = models.DecimalField(max_digits=10, decimal_places=2) 
+    
+    # পয়েন্ট ভ্যালু এখন Integer (পূর্ণসংখ্যা)
+    point_value = models.IntegerField(default=0, editable=False) 
     
     stock = models.IntegerField(default=0)
     image = models.ImageField(upload_to='products/', null=True, blank=True)
@@ -44,13 +46,17 @@ class Product(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
 
     def save(self, *args, **kwargs):
-        # লাভ = বিক্রি দাম - কেনা দাম
+        # লাভ হিসাব: বিক্রি দাম - কেনা দাম
+        # Decimal থেকে float-এ রূপান্তর করে হিসাব করা সহজ
         profit = float(self.price) - float(self.purchase_price)
+        
         # ৪ টাকায় ১ পয়েন্ট লজিক
         if profit > 0:
-            self.point_value = profit / 4
+            # math.floor দিলে ২৫.৯৯ হলেও সেটা ২৫ দেখাবে (পূর্ণসংখ্যা)
+            self.point_value = math.floor(profit / 4)
         else:
             self.point_value = 0
+            
         super(Product, self).save(*args, **kwargs)
 
     def __str__(self):
