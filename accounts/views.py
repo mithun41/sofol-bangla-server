@@ -8,6 +8,7 @@ from rest_framework.permissions import IsAuthenticated, IsAdminUser, AllowAny
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework_simplejwt.views import TokenObtainPairView
 from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
+from rest_framework_simplejwt.tokens import RefreshToken
 
 # accounts.services থেকে আমাদের লেটেস্ট লজিক
 from accounts.services import (
@@ -408,3 +409,45 @@ class AdminDashboardStatsView(APIView):
         }
 
         return Response(data)
+    
+
+# ... তোর অন্যান্য ইম্পোর্ট ...
+
+# --- ১. LOGOUT API (মোবাইল অ্যাপের জন্য মাস্ট) ---
+class LogoutView(APIView):
+    """
+    অ্যাপ থেকে লগআউট করার সময় Refresh Token ব্ল্যাকলিস্ট করবে।
+    """
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        try:
+            refresh_token = request.data.get("refresh")
+            if not refresh_token:
+                return Response({"error": "Refresh token is required"}, status=status.HTTP_400_BAD_REQUEST)
+            
+            token = RefreshToken(refresh_token)
+            token.blacklist()
+
+            return Response({
+                "success": True, 
+                "message": "Successfully logged out!"
+            }, status=status.HTTP_200_OK)
+        except Exception as e:
+            return Response({"error": "Invalid token or already logged out"}, status=status.HTTP_400_BAD_REQUEST)
+
+# --- ২. PASSWORD CHANGE API (সিকিউরিটির জন্য) ---
+class ChangePasswordView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        user = request.user
+        old_password = request.data.get("old_password")
+        new_password = request.data.get("new_password")
+
+        if not user.check_password(old_password):
+            return Response({"error": "Old password is correct"}, status=status.HTTP_400_BAD_REQUEST)
+
+        user.set_password(new_password)
+        user.save()
+        return Response({"message": "Password changed successfully!"})

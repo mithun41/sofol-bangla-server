@@ -7,8 +7,7 @@ from .models import BonusLog, User, GlobalFund, FundLog
 
 def distribute_money_to_funds(points):
     """
-    অর্ডার কমপ্লিট হলে সাথে সাথে কল হবে (ইউজার একটিভ হোক বা না হোক)।
-    পয়েন্ট থেকে ৬টি ফান্ডে টাকা জমা করবে।
+    অর্ডার কমপ্লিট হলে সাথে সাথে কল হবে। পয়েন্ট থেকে ৬টি ফান্ডে টাকা জমা করবে।
     """
     total_money = Decimal(points) * 4
     fund, created = GlobalFund.objects.get_or_create(id=1)
@@ -50,11 +49,47 @@ def deduct_from_fund(primary_fund_name, amount):
         FundLog.objects.create(fund_type=primary_fund_name, amount=primary_balance, transaction_type='outbound', reason="Primary Fund Depleted")
         FundLog.objects.create(fund_type='company_fund', amount=remaining, transaction_type='outbound', reason="Covered by Company Fund")
     else:
-        # ব্যালেন্স না থাকলে বোনাস ট্রানজ্যাকশন হবে না
         return False
     
     fund.save()
     return True
+
+# --- LEADERSHIP BONUS LOGIC (NEW) ---
+
+def distribute_leadership_bonus(earner_user, bonus_amount):
+    """
+    যখনই কেউ বোনাস পাবে, তার আপলাইনরা তাদের স্টার লেভেল অনুযায়ী 
+    জেনারেশন বোনাস (১০%) পাবে লিডারশিপ ফান্ড থেকে।
+    """
+    current_upline = earner_user.placement_under
+    generation = 1
+    max_generation = 5  # ৮ স্টার সর্বোচ্চ ৫ লেভেল পর্যন্ত পায়
+
+    while current_upline and generation <= max_generation:
+        with transaction.atomic():
+            upline = User.objects.select_for_update().get(pk=current_upline.pk)
+            
+            # এলিজিবিলিটি চেক: ৪ স্টার=১ লেভেল, ৫ স্টার=২ লেভেল... ৮ স্টার=৫ লেভেল
+            is_eligible = False
+            if upline.star_level == 4 and generation <= 1: is_eligible = True
+            elif upline.star_level == 5 and generation <= 2: is_eligible = True
+            elif upline.star_level == 6 and generation <= 3: is_eligible = True
+            elif upline.star_level == 7 and generation <= 4: is_eligible = True
+            elif upline.star_level == 8 and generation <= 5: is_eligible = True
+
+            if is_eligible and upline.status == 'active':
+                l_bonus = Decimal(bonus_amount) * Decimal('0.10')
+                
+                if deduct_from_fund('leadership_fund', l_bonus):
+                    upline.balance += l_bonus
+                    upline.save()
+                    BonusLog.objects.create(
+                        user=upline, amount=l_bonus,
+                        reason=f"Leadership Bonus: Gen {generation} from {earner_user.username}"
+                    )
+        
+        current_upline = upline.placement_under
+        generation += 1
 
 # --- PLACEMENT LOGIC ---
 
@@ -89,7 +124,6 @@ def find_auto_placement(referrer_node):
 # --- MLM CORE LOGIC ---
 
 def update_user_rank(user):
-    """র‍্যাঙ্ক বোনাস এখন rank_reward_fund থেকে কাটা হবে।"""
     matching = min(user.total_left, user.total_right)
     new_star = 0
     if matching >= 1200: new_star = 8
@@ -113,7 +147,6 @@ def update_user_rank(user):
         user.save()
 
 def distribute_binary_matching(child_node):
-    """ম্যাচিং বোনাস এখন matching_fund থেকে কাটা হবে।"""
     if not child_node or child_node.status != 'active':
         return
 
@@ -147,11 +180,13 @@ def distribute_binary_matching(child_node):
                         if deduct_from_fund('matching_fund', bonus_to_add):
                             parent.balance += bonus_to_add
                             parent.paid_matches = total_eligible
+                            parent.save() # সেভ করা হলো যাতে জেনারেশন বোনাস ঠিকঠাক পায়
                             BonusLog.objects.create(
-                                user=parent, 
-                                amount=bonus_to_add,
+                                user=parent, amount=bonus_to_add,
                                 reason=f"Matching Bonus: {new_matches} pair(s)"
                             )
+                            # লিডারশিপ বোনাস ডিস্ট্রিবিউশন
+                            distribute_leadership_bonus(parent, bonus_to_add)
             
             parent.save() 
             update_user_rank(parent) 
@@ -160,11 +195,6 @@ def distribute_binary_matching(child_node):
             parent = parent.placement_under
 
 def calculate_commission(user):
-    """
-    ইউজার ১০০০ পয়েন্টে একটিভ হওয়ার পর এই ফাংশন কল হয়।
-    পয়েন্ট থেকে ফান্ডের ডিস্ট্রিবিউশন এখন মডেলের save() মেথড থেকে সরাসরি হয়।
-    এখানে শুধু রেফারেল এবং বাইনারি চেইন প্রসেস হবে।
-    """
     if user.referred_by:
         ref = user.referred_by
         bonus_amount = Decimal(500)
@@ -174,11 +204,11 @@ def calculate_commission(user):
                 ref = User.objects.select_for_update().get(pk=ref.pk)
                 ref.balance += bonus_amount
                 BonusLog.objects.create(
-                    user=ref, 
-                    amount=bonus_amount, 
+                    user=ref, amount=bonus_amount, 
                     reason=f"Direct Referral: {user.username}"
                 )
                 ref.save()
+                # লিডারশিপ বোনাস ডিস্ট্রিবিউশন
+                distribute_leadership_bonus(ref, bonus_amount)
     
-    # বাইনারি ডিস্ট্রিবিউশন শুরু
     distribute_binary_matching(user)
