@@ -226,7 +226,10 @@ class UserUpdateView(generics.RetrieveUpdateAPIView):
                 reff_id_input = data.get('reff_id_input')
                 if reff_id_input:
                     referrer = User.objects.filter(reff_id=reff_id_input).first()
-                    if referrer: user.referred_by = referrer
+                    if referrer: 
+                        user.referred_by = referrer
+                    else:
+                        return Response({"error": "Invalid Referral ID!"}, status=400)
 
                 # ২. প্লেসমেন্ট লজিক
                 plc_id_input = data.get('placement_id_input')
@@ -234,35 +237,38 @@ class UserUpdateView(generics.RetrieveUpdateAPIView):
 
                 if plc_id_input:
                     target_parent = User.objects.filter(placement_id=plc_id_input).first()
-                    if target_parent:
-                        if manual_position in ['left', 'right']:
-                            occupied = User.objects.filter(placement_under=target_parent, position=manual_position).exclude(id=user.id).exists()
-                            if not occupied:
-                                user.placement_under, user.position = target_parent, manual_position
-                            else:
-                                final_parent, final_pos = find_auto_placement_with_division(target_parent, user.division)
-                                user.placement_under, user.position = final_parent, final_pos
+                    if not target_parent:
+                        return Response({"error": f"Placement ID {plc_id_input} not found!"}, status=400)
+                    
+                    if manual_position in ['left', 'right']:
+                        # পজিশন চেক
+                        occupied = User.objects.filter(placement_under=target_parent, position=manual_position).exclude(id=user.id).exists()
+                        if not occupied:
+                            user.placement_under, user.position = target_parent, manual_position
                         else:
-                            final_parent, final_pos = find_auto_placement_with_division(target_parent, user.division)
-                            user.placement_under, user.position = final_parent, final_pos
+                            return Response({"error": f"{manual_position.capitalize()} side is already occupied under this ID!"}, status=400)
+                    else:
+                        # যদি পজিশন না দেওয়া হয় তবে অটো প্লেসমেন্ট
+                        final_parent, final_pos = find_auto_placement_with_division(target_parent, user.division)
+                        user.placement_under, user.position = final_parent, final_pos
 
-                # ৩. অন্যান্য তথ্য এবং স্ট্যাটাস
+                # ৩. অন্যান্য তথ্য আপডেট
                 if 'status' in data: user.status = data['status']
                 if 'name' in data: user.name = data['name']
                 if 'phone' in data: user.phone = data['phone']
-                if 'division' in data: user.division = data['division']
-
+                
                 user.save() 
 
-                # ৪. অ্যাক্টিভেশন চেক
+                # ৪. অ্যাক্টিভেশন এবং ট্রি রিক্যালকুলেশন
                 if old_status == 'inactive' and user.status == 'active':
                     calculate_commission(user)
 
                 self.recalculate_tree_counts()
                 user.refresh_from_db()
                 return Response(self.get_serializer(user).data)
+                
         except Exception as e:
-            return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
+            return Response({"error": f"Server Error: {str(e)}"}, status=status.HTTP_400_BAD_REQUEST)
 
     def recalculate_tree_counts(self):
         users = User.objects.all()

@@ -1,6 +1,7 @@
 from django.db import models
 from django.conf import settings
 from django.utils.text import slugify
+import math
 
 class Category(models.Model):
     name = models.CharField(max_length=100, unique=True)
