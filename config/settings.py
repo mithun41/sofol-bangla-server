@@ -27,7 +27,7 @@ SECRET_KEY = 'django-insecure-k5z3s@m9krt(*(!lj#g7i6=v859&3h)b#a6#4-zl(92ypf&0-v
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = True
 
-ALLOWED_HOSTS = []
+ALLOWED_HOSTS = ['mithun41.pythonanywhere.com', 'localhost', '127.0.0.1']
 
 
 # Application definition
@@ -77,7 +77,10 @@ MIDDLEWARE = [
 ]
 
 ROOT_URLCONF = 'config.urls'
-CORS_ALLOW_ALL_ORIGINS = True
+CORS_ALLOWED_ORIGINS = [
+    "https://sofol-bangla-frontend.vercel.app",
+    "http://localhost:3000",
+]
 MEDIA_URL = '/media/'
 MEDIA_ROOT = os.path.join(BASE_DIR, 'media')
 
@@ -145,4 +148,10 @@ USE_TZ = True
 # https://docs.djangoproject.com/en/6.0/howto/static-files/
 
 STATIC_URL = 'static/'
+STATIC_ROOT = os.path.join(BASE_DIR, 'staticfiles')
 AUTH_USER_MODEL = 'accounts.User'
+DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
+CSRF_TRUSTED_ORIGINS = ["https://sofol-bangla-frontend.vercel.app"]
+
+# প্রোডাকশনে এটাকে False করে দিবি যখন কাজ শেষ হবে
+DEBUG = True
