@@ -31,20 +31,34 @@ class ProductSerializer(serializers.ModelSerializer):
 
 
 
+
+
 class CartSerializer(serializers.ModelSerializer):
-    # এই ফিল্ডগুলো রিড-অনলি হিসেবে থাকবে যা ফ্রন্টএন্ডে ডাটা দেখাবে
+    # রিড-অনলি ফিল্ড যা সরাসরি মডেল থেকে ডাটা আনবে
     product_name = serializers.ReadOnlyField(source='product.name')
+    product_pv = serializers.ReadOnlyField(source='product.point_value')
+    
+    # মেথড ফিল্ড যা লজিক্যালি ক্যালকুলেট হবে
     product_image = serializers.SerializerMethodField()
     product_price = serializers.SerializerMethodField()
-    product_pv = serializers.ReadOnlyField(source='product.point_value')
+    item_subtotal = serializers.SerializerMethodField() # ব্যাকএন্ড থেকে পাঠানো সাবটোটাল
 
     class Meta:
         model = Cart
-        fields = ['id', 'product', 'product_name', 'product_price', 'product_image', 'product_pv', 'quantity']
+        fields = [
+            'id', 
+            'product', 
+            'product_name', 
+            'product_price', 
+            'product_image', 
+            'product_pv', 
+            'quantity', 
+            'item_subtotal'
+        ]
 
     def get_product_image(self, obj):
         request = self.context.get('request')
-        # যদি obj ডিকশনারি হয় তবে গেট ব্যবহার করো, নাহলে ডট
+        # ডিকশনারি বা অবজেক্ট হ্যান্ডেল করার জন্য সেফ চেক
         product = obj.get('product') if isinstance(obj, dict) else obj.product
         
         if product and product.image:
@@ -55,7 +69,6 @@ class CartSerializer(serializers.ModelSerializer):
 
     def get_product_price(self, obj):
         request = self.context.get('request')
-        # ডিকশনারি কি না চেক করে প্রোডাক্ট বের করা
         product = obj.get('product') if isinstance(obj, dict) else obj.product
         
         if not product:
@@ -63,18 +76,25 @@ class CartSerializer(serializers.ModelSerializer):
 
         base_price = float(product.price)
         
-        if not request or not request.user.is_authenticated:
-            return base_price
+        # ইউজার লগইন থাকলে এবং স্ট্যাটাস Active হলে PV মাইনাস হবে (ডিসকাউন্ট)
+        if request and request.user.is_authenticated:
+            user = request.user
+            u_status = ""
+            if hasattr(user, 'profile'):
+                u_status = getattr(user.profile, 'status', '').lower()
+            elif hasattr(user, 'status'):
+                u_status = getattr(user, 'status', '').lower()
 
-        user = request.user
-        pv = float(product.point_value or 0)
-
-        u_status = ""
-        if hasattr(user, 'profile'):
-            u_status = getattr(user.profile, 'status', '').lower()
-        elif hasattr(user, 'status'):
-            u_status = getattr(user, 'status', '').lower()
-
-        if u_status == 'active':
-            return base_price - pv
+            if u_status == 'active':
+                pv = float(product.point_value or 0)
+                return base_price - pv
+                
         return base_price
+
+    def get_item_subtotal(self, obj):
+        """
+        এখানে সরাসরি এপিআই থেকে (Price * Quantity) ক্যালকুলেট করে পাঠানো হচ্ছে।
+        """
+        price = self.get_product_price(obj)
+        qty = obj.quantity if not isinstance(obj, dict) else obj.get('quantity', 0)
+        return float(price) * int(qty)

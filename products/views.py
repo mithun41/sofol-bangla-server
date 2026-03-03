@@ -101,6 +101,21 @@ class CartViewSet(viewsets.ModelViewSet):
             cart_item.save()
         else:
             serializer.save(user=self.request.user)
+            
+    def list(self, request, *args, **kwargs):
+        queryset = self.get_queryset()
+        serializer = self.get_serializer(queryset, many=True)
+        
+        # গ্র্যান্ড সাবটোটাল ক্যালকুলেট করা
+        cart_data = serializer.data
+        grand_subtotal = sum(item['item_subtotal'] for item in cart_data)
+        
+        # কাস্টম রেসপন্স ফরম্যাট
+        return Response({
+            "cart_items": cart_data,
+            "grand_subtotal": grand_subtotal,
+            "total_items": len(cart_data)
+        })
 
     @action(detail=False, methods=['delete'])
     def clear(self, request):
