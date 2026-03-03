@@ -78,20 +78,24 @@ class CartSyncView(APIView):
 
 
 
+
+
 class CartViewSet(viewsets.ModelViewSet):
     serializer_class = CartSerializer
     permission_classes = [permissions.IsAuthenticated]
 
     def get_queryset(self):
+        # শুধুমাত্র বর্তমান ইউজারের কার্ট আইটেমগুলো দেখাবে
         return Cart.objects.filter(user=self.request.user)
 
-    # এই অংশটুকু মিসিং ছিল - যা ডিসকাউন্ট লজিককে রিকোয়েস্ট পাঠাবে
     def get_serializer_context(self):
+        # সিরিয়ালাইজারের ভেতর রিকোয়েস্ট অবজেক্ট পাঠানোর জন্য (ইমেজ ইউআরএল এবং ডিসকাউন্ট ক্যালকুলেশনের জন্য জরুরি)
         context = super().get_serializer_context()
         context.update({"request": self.request})
         return context
 
     def perform_create(self, serializer):
+        # কার্টে নতুন প্রোডাক্ট অ্যাড করার সময় যদি অলরেডি থাকে তবে কোয়ান্টিটি বাড়িয়ে দেবে
         product = serializer.validated_data.get('product')
         quantity = serializer.validated_data.get('quantity', 1)
         cart_item = Cart.objects.filter(user=self.request.user, product=product).first()
@@ -101,21 +105,20 @@ class CartViewSet(viewsets.ModelViewSet):
             cart_item.save()
         else:
             serializer.save(user=self.request.user)
-            
+
     def list(self, request, *args, **kwargs):
+        # তোর রিকোয়ারমেন্ট অনুযায়ী সরাসরি Array (লিস্ট) রিটার্ন করবে
         queryset = self.get_queryset()
         serializer = self.get_serializer(queryset, many=True)
-        
-        # গ্র্যান্ড সাবটোটাল ক্যালকুলেট করা
-        cart_data = serializer.data
-        grand_subtotal = sum(item['item_subtotal'] for item in cart_data)
-        
-        # কাস্টম রেসপন্স ফরম্যাট
-        return Response({
-            "cart_items": cart_data,
-            "grand_subtotal": grand_subtotal,
-            "total_items": len(cart_data)
-        })
+        return Response(serializer.data)
+
+    def destroy(self, request, *args, **kwargs):
+        # কার্ট থেকে আইটেম রিমুভ করার জন্য
+        instance = self.get_object()
+        self.perform_destroy(instance)
+        return Response(status=status.HTTP_204_NO_CONTENT)
+            
+    
 
     @action(detail=False, methods=['delete'])
     def clear(self, request):
