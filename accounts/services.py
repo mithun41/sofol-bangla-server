@@ -6,31 +6,42 @@ from .models import BonusLog, User, GlobalFund, FundLog
 # --- FUND MANAGEMENT UTILITIES ---
 
 def distribute_money_to_funds(points):
-    """
-    অর্ডার কমপ্লিট হলে সাথে সাথে কল হবে। পয়েন্ট থেকে ৬টি ফান্ডে টাকা জমা করবে।
-    """
+    if not points or Decimal(points) <= 0:
+        return
+
     total_money = Decimal(points) * 4
-    fund, created = GlobalFund.objects.get_or_create(id=1)
+    # নিশ্চিত করো ID=1 আছে, না থাকলে তৈরি করো
+    fund, _ = GlobalFund.objects.get_or_create(id=1)
     
     distributions = {
-        'referral_fund': total_money * Decimal('0.125'),   # 12.5%
-        'matching_fund': total_money * Decimal('0.10'),    # 10.0%
-        'rank_reward_fund': total_money * Decimal('0.125'), # 12.5%
-        'tour_fund': total_money * Decimal('0.25'),        # 25.0%
-        'leadership_fund': total_money * Decimal('0.125'),  # 12.5%
-        'company_fund': total_money * Decimal('0.275'),     # 27.5%
+        'referral_fund': total_money * Decimal('0.125'),
+        'matching_fund': total_money * Decimal('0.10'),
+        'rank_reward_fund': total_money * Decimal('0.125'),
+        'tour_fund': total_money * Decimal('0.25'),
+        'leadership_fund': total_money * Decimal('0.125'),
+        'company_fund': total_money * Decimal('0.275'),
     }
 
-    with transaction.atomic():
-        for field, amount in distributions.items():
-            current_val = getattr(fund, field)
-            setattr(fund, field, current_val + amount)
-            FundLog.objects.create(
-                fund_type=field, amount=amount, 
-                transaction_type='inbound', 
-                reason=f"Point Inflow: {points} pts"
-            )
-        fund.save()
+    try:
+        with transaction.atomic():
+            # ডাটাবেস লেভেলে ফান্ড রো-টাকে লক করো যেন অন্য কেউ একই সাথে আপডেট না করে
+            fund = GlobalFund.objects.select_for_update().get(id=1)
+            
+            for field, amount in distributions.items():
+                current_val = getattr(fund, field) or Decimal('0') # যদি None থাকে তবে 0 ধরবে
+                setattr(fund, field, current_val + amount)
+                
+                FundLog.objects.create(
+                    fund_type=field, 
+                    amount=amount, 
+                    transaction_type='inbound', 
+                    reason=f"Point Inflow: {points} pts"
+                )
+            fund.save()
+    except Exception as e:
+        # এররটা প্রিন্ট করো যেন PythonAnywhere লগ-এ দেখতে পারো
+        print(f"FUND DISTRIBUTION ERROR: {str(e)}")
+        raise e # আবার রেইজ করো যেন অর্ডার আপডেটটাও ক্যানসেল হয় (ডাটা কনসিস্টেন্সি)
 
 def deduct_from_fund(primary_fund_name, amount):
     """বোনাস দেওয়ার আগে ফান্ড চেক করবে। না থাকলে কোম্পানি ফান্ড থেকে নিবে।"""
