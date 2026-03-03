@@ -30,56 +30,37 @@ class ProductSerializer(serializers.ModelSerializer):
         
 
 
+
 class CartSerializer(serializers.ModelSerializer):
+    # এই ফিল্ডগুলো রিড-অনলি হিসেবে থাকবে যা ফ্রন্টএন্ডে ডাটা দেখাবে
     product_name = serializers.ReadOnlyField(source='product.name')
-    # তোর ফ্রন্টএন্ড এই নামটা খুঁজছে, তাই আমরা এটাই পাঠাবো
-    product_price = serializers.SerializerMethodField() 
-    product_pv = serializers.SerializerMethodField()
     product_image = serializers.SerializerMethodField()
-    subtotal = serializers.SerializerMethodField()
+    product_price = serializers.SerializerMethodField()
+    product_pv = serializers.ReadOnlyField(source='product.point_value')
 
     class Meta:
         model = Cart
-        fields = [
-            'id', 'product', 'product_name', 'product_price', 
-            'product_pv', 'product_image', 'quantity', 'subtotal'
-        ]
-        read_only_fields = ['user']
-
-    def get_product_price(self, obj):
-     product = obj.product
-     request = self.context.get('request')
-    
-     price = float(product.price or 0)
-     pv = float(product.point_value or 0)
-    
-     if request and request.user.is_authenticated:
-        # প্রোফাইল থেকে স্ট্যাটাস চেক করা
-        user_status = ""
-        if hasattr(request.user, 'profile'):
-            # সরাসরি স্ট্যাটাস ফিল্ড থেকে ভ্যালু নেওয়া (active/inactive)
-            user_status = getattr(request.user.profile, 'status', '').lower()
-        elif hasattr(request.user, 'status'):
-            user_status = getattr(request.user, 'status', '').lower()
-            
-        # যদি স্ট্যাটাস ঠিক 'active' হয়, তবেই ডিসকাউন্ট পাবে
-        if user_status == 'active':
-            return price - pv
-            
-     return price
-
-    def get_product_pv(self, obj):
-        return float(obj.product.point_value or 0)
-
-    def get_subtotal(self, obj):
-        # ডাইনামিক প্রাইস * কোয়ান্টিটি
-        price = self.get_product_price(obj)
-        return price * obj.quantity
+        fields = ['id', 'product', 'product_name', 'product_price', 'product_image', 'product_pv', 'quantity']
 
     def get_product_image(self, obj):
-        product = obj.product
         request = self.context.get('request')
-        if product.image:
-            # ফুল URL জেনারেট করা যেন ফ্রন্টএন্ডে ইমেজ শো করে
-            return request.build_absolute_uri(product.image.url) if request else product.image.url
+        if obj.product.image:
+            # ইমেজ ইউআরএল ফুল পাথ করার জন্য
+            return request.build_absolute_uri(obj.product.image.url) if request else obj.product.image.url
         return None
+
+    def get_product_price(self, obj):
+        user = self.context.get('request').user
+        base_price = float(obj.product.price)
+        pv = float(obj.product.point_value or 0)
+
+        # ইউজার অ্যাক্টিভ কি না চেক করে ডিসকাউন্ট লজিক
+        u_status = ""
+        if hasattr(user, 'profile'):
+            u_status = getattr(user.profile, 'status', '').lower()
+        elif hasattr(user, 'status'):
+            u_status = getattr(user, 'status', '').lower()
+
+        if u_status == 'active':
+            return base_price - pv
+        return base_price
