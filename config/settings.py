@@ -110,7 +110,7 @@ DATABASES = {
         'ENGINE': 'django.db.backends.mysql',
         'NAME': 'mithun41$default',           # স্ক্রিনশট থেকে পাওয়া নাম
         'USER': 'mithun41',                   # তোর ইউজারনেম
-        'PASSWORD': 'sofolbangla@41',      # ১ নম্বর ধাপে যা সেট করলি
+        'PASSWORD': 'sofolbangla@8441',      # ১ নম্বর ধাপে যা সেট করলি
         'HOST': 'mithun41.mysql.pythonanywhere-services.com', # হোস্ট এড্রেস
         'PORT': '3306',
         'OPTIONS': {
