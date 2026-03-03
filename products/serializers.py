@@ -44,25 +44,31 @@ class CartSerializer(serializers.ModelSerializer):
 
     def get_product_image(self, obj):
         request = self.context.get('request')
-        # obj.product না থাকলে বা ইমেজ না থাকলে সেফলি হ্যান্ডেল করা
-        if obj.product and obj.product.image:
+        # যদি obj ডিকশনারি হয় তবে গেট ব্যবহার করো, নাহলে ডট
+        product = obj.get('product') if isinstance(obj, dict) else obj.product
+        
+        if product and product.image:
             if request:
-                return request.build_absolute_uri(obj.product.image.url)
-            return obj.product.image.url
+                return request.build_absolute_uri(product.image.url)
+            return product.image.url
         return None
 
     def get_product_price(self, obj):
         request = self.context.get('request')
-        base_price = float(obj.product.price)
+        # ডিকশনারি কি না চেক করে প্রোডাক্ট বের করা
+        product = obj.get('product') if isinstance(obj, dict) else obj.product
         
-        # যদি রিকোয়েস্ট না থাকে বা ইউজার লগইন না থাকে, তবে নরমাল দাম দেখাবে
+        if not product:
+            return 0.0
+
+        base_price = float(product.price)
+        
         if not request or not request.user.is_authenticated:
             return base_price
 
         user = request.user
-        pv = float(obj.product.point_value or 0)
+        pv = float(product.point_value or 0)
 
-        # ইউজার অ্যাক্টিভ কি না চেক করে ডিসকাউন্ট লজিক
         u_status = ""
         if hasattr(user, 'profile'):
             u_status = getattr(user.profile, 'status', '').lower()
