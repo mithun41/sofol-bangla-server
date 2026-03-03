@@ -107,8 +107,15 @@ WSGI_APPLICATION = 'config.wsgi.application'
 
 DATABASES = {
     'default': {
-        'ENGINE': 'django.db.backends.sqlite3',
-        'NAME': BASE_DIR / 'db.sqlite3',
+        'ENGINE': 'django.db.backends.mysql',
+        'NAME': 'mithun41$default',           # স্ক্রিনশট থেকে পাওয়া নাম
+        'USER': 'mithun41',                   # তোর ইউজারনেম
+        'PASSWORD': 'sofolbangla41',      # ১ নম্বর ধাপে যা সেট করলি
+        'HOST': 'mithun41.mysql.pythonanywhere-services.com', # হোস্ট এড্রেস
+        'PORT': '3306',
+        'OPTIONS': {
+            'init_command': "SET sql_mode='STRICT_TRANS_TABLES'",
+        },
     }
 }
 
