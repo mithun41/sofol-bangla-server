@@ -5,7 +5,7 @@ from django.conf import settings
 
 class User(AbstractUser):
     name = models.CharField(max_length=255, blank=True)
-    email = models.EmailField(unique=True)
+    email = models.EmailField(unique=False, null=True, blank=True)
     phone = models.CharField(max_length=15, unique=True)
     profile_picture = models.ImageField(upload_to='profile_pics/', null=True, blank=True)
     reff_id = models.CharField(max_length=12, unique=True, blank=True)

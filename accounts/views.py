@@ -18,7 +18,7 @@ from accounts.services import (
 )
 from .models import BonusLog, FundLog, GlobalFund, User, WithdrawalRequest
 from .serializers import (
-    RegisterSerializer, UserListSerializer, WithdrawalSerializer, 
+    RegisterSerializer, UserListSerializer, UserProfileUpdateSerializer, WithdrawalSerializer, 
     BonusLogSerializer
 )
 from django.db.models import Sum
@@ -33,23 +33,35 @@ class RegisterView(generics.CreateAPIView):
     authentication_classes = []
 
     def create(self, request, *args, **kwargs):
-        # ১. সিরিয়ালাইজার দিয়ে ডাটা ভ্যালিডেট করা (Username/Email checks)
+        # ১. সিরিয়ালাইজার দিয়ে ডাটা ভ্যালিডেট করা
         serializer = self.get_serializer(data=request.data)
         if not serializer.is_valid():
-            # ডুপ্লিকেট ইউজারনেম বা ইমেইল থাকলে এখান থেকেই এরর যাবে
             return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
         data = request.data
+        
+        # বাধ্যতামূলক ফিল্ডগুলো চেক (নিরাপত্তার জন্য ভিউতেও একবার চেক করে নেওয়া ভালো)
+        username = data.get('username')
+        phone = data.get('phone')
+        password = data.get('password')
+
+        if not username or not phone or not password:
+            return Response({"error": "Username, Phone and Password are required!"}, status=status.HTTP_400_BAD_REQUEST)
+
+        # অপশনাল ফিল্ডগুলো (না থাকলে ব্ল্যাঙ্ক বা ডিফল্ট বসবে)
         user_division = data.get('division', '') 
+        email = data.get('email', None) # ইমেইল না থাকলে None যাবে
+        name = data.get('name', '')
         reff_id = data.get('reff_id')
+        
         referrer = None
 
-        # ২. রেফারেল আইডি চেক
+        # ২. রেফারেল আইডি চেক (যদি থাকে)
         if reff_id:
             try:
                 referrer = User.objects.get(reff_id=reff_id)
             except User.DoesNotExist:
-                return Response({"reff_id": ["Invalid Referral ID. Please check again."]}, status=status.HTTP_400_BAD_REQUEST)
+                return Response({"reff_id": ["Invalid Referral ID."]}, status=status.HTTP_400_BAD_REQUEST)
 
         # ৩. প্লেসমেন্ট এবং পজিশন লজিক
         placement_id = data.get('placement_id')
@@ -57,22 +69,14 @@ class RegisterView(generics.CreateAPIView):
         final_parent = None
         final_pos = None
 
-        if placement_id and position:
+        # লজিক: যদি প্লেসমেন্ট আইডি থাকে তবে সেটা ধরবে, নাহলে রেফারারের আন্ডারে অটো যাবে
+        if placement_id:
             try:
                 target_parent = User.objects.get(placement_id=placement_id)
-                # পজিশন কি খালি আছে?
-                if not User.objects.filter(placement_under=target_parent, position=position).exists():
+                if position and not User.objects.filter(placement_under=target_parent, position=position).exists():
                     final_parent, final_pos = target_parent, position
                 else:
-                    # অটো প্লেসমেন্ট লজিক (নিশ্চিত কর এই ফাংশনটি ইম্পোর্ট করা আছে)
                     final_parent, final_pos = find_auto_placement_with_division(target_parent, user_division)
-            except User.DoesNotExist:
-                return Response({"placement_id": ["Invalid Placement ID."]}, status=status.HTTP_400_BAD_REQUEST)
-        
-        elif placement_id:
-            try:
-                target_parent = User.objects.get(placement_id=placement_id)
-                final_parent, final_pos = find_auto_placement_with_division(target_parent, user_division)
             except User.DoesNotExist:
                 return Response({"placement_id": ["Invalid Placement ID."]}, status=status.HTTP_400_BAD_REQUEST)
         
@@ -80,7 +84,7 @@ class RegisterView(generics.CreateAPIView):
             final_parent, final_pos = find_auto_placement_with_division(referrer, user_division)
         
         else:
-            # রুট ইউজার (অ্যাডমিন) চেক
+            # একদম রুট ইউজার (অ্যাডমিন) আন্ডারে যাবে যদি কেউ না থাকে
             root_user = User.objects.filter(is_superuser=True).first()
             if root_user:
                 final_parent, final_pos = find_auto_placement_with_division(root_user, user_division)
@@ -89,11 +93,11 @@ class RegisterView(generics.CreateAPIView):
         try:
             with transaction.atomic():
                 user = User.objects.create_user(
-                    username=data.get('username'),
-                    email=data.get('email'),
-                    password=data.get('password'),
-                    phone=data.get('phone'),
-                    name=data.get('name', ''),
+                    username=username,
+                    email=email, # এটা এখন অপশনাল
+                    password=password,
+                    phone=phone,
+                    name=name,
                     division=user_division, 
                     referred_by=referrer,
                     placement_under=final_parent,
@@ -107,15 +111,13 @@ class RegisterView(generics.CreateAPIView):
                         "username": user.username,
                         "placement_under": final_parent.username if final_parent else "None",
                         "position": final_pos,
-                        "division": user.division,
                         "reff_id": user.reff_id
                     }
                 }, status=status.HTTP_201_CREATED)
 
         except Exception as e:
-            # অন্যান্য যেকোনো টেকনিক্যাল এরর
             return Response({"general": [str(e)]}, status=status.HTTP_400_BAD_REQUEST)
-
+        
 class UserProfileView(APIView):
     permission_classes = [IsAuthenticated]
 
@@ -129,7 +131,7 @@ class UserProfileView(APIView):
             "phone": user.phone, 
             "role": user.role,
             "profile_picture": profile_pic,
-            "balance": user.balance,
+            "balance": float(user.balance),
             "points": user.points,
             "left_count": user.left_count,
             "right_count": user.right_count,
@@ -147,6 +149,29 @@ class UserProfileView(APIView):
         if 'profile_picture' in request.FILES: user.profile_picture = request.FILES['profile_picture']
         user.save()
         return Response({"message": "Profile updated successfully!"})
+    
+from rest_framework.views import APIView
+from rest_framework.parsers import JSONParser, MultiPartParser, FormParser
+from rest_framework.permissions import IsAuthenticated
+
+class ProfileUpdateView(APIView):
+    permission_classes = [IsAuthenticated]
+    # এই নিচের লাইনটা খুব গুরুত্বপূর্ণ, এটা ছাড়া 415 এরর দিবেই
+    parser_classes = (MultiPartParser, FormParser, JSONParser) 
+
+    def patch(self, request):
+        user = request.user
+        # partial=True দেওয়া হয়েছে যাতে শুধু পাঠানো ডাটাগুলো আপডেট হয়
+        serializer = UserProfileUpdateSerializer(user, data=request.data, partial=True)
+        
+        if serializer.is_valid():
+            serializer.save()
+            return Response({
+                "status": "success",
+                "message": "Profile updated successfully",
+                "data": serializer.data
+            })
+        return Response(serializer.errors, status=400)
 
 class MyTokenObtainPairSerializer(TokenObtainPairSerializer):
     def validate(self, attrs):

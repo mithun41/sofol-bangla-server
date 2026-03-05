@@ -50,9 +50,9 @@ class OrderCreateView(APIView):
                     unit_pv = float(product.point_value or 0)
                     
                     if is_active_user:
-                        # মেম্বার প্রাইস: ৩০০ - ৫০ = ২৫০ টাকা
-                        final_unit_price = base_price - unit_pv 
-                        final_unit_pv = 0 
+                       discount = unit_pv * 2
+                       final_unit_price = base_price - discount
+                       final_unit_pv = 0 
                     else:
                         # সাধারণ প্রাইস: ৩০০ টাকা (ফুল) এবং পয়েন্ট পাবে ৫০
                         final_unit_price = base_price
