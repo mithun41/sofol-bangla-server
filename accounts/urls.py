@@ -5,6 +5,7 @@ from .views import (
     AdminDashboardStatsView,
     BonusLogListView,
     MyTokenObtainPairView,
+    ProfileUpdateView,
     RegisterView, 
     UserListView, 
     UserProfileView, 
@@ -28,6 +29,7 @@ urlpatterns = [
     
     # --- User Profile & Networking ---
     path('profile/', UserProfileView.as_view(), name='profile'),
+    path('profile/update/', ProfileUpdateView.as_view(), name='profile-update'),
     path('tree/<str:username>/', BinaryTreeView.as_view(), name='tree-view'),
     path('bonus-logs/', BonusLogListView.as_view(), name='bonus-logs'),
     

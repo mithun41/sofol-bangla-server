@@ -4,7 +4,8 @@ from rest_framework.response import Response
 from rest_framework.decorators import action
 from .models import Product, Category
 from .serializers import CartSerializer, ProductSerializer, CategorySerializer
-from .models import Product, Category, Cart 
+from .models import Product, Category, Cart
+from django.db.models import Q 
 
 class CategoryViewSet(viewsets.ModelViewSet):
     queryset = Category.objects.all()
@@ -22,17 +23,59 @@ class CategoryViewSet(viewsets.ModelViewSet):
             return [permissions.IsAdminUser()]
         return [permissions.AllowAny()]
 
+
+
+
+
 class ProductViewSet(viewsets.ModelViewSet):
+    # ১. Router-এর basename এরর ফিক্স করার জন্য ডিফল্ট কুয়েরিসেট
     queryset = Product.objects.all().order_by('-created_at')
     serializer_class = ProductSerializer
 
+    def get_queryset(self):
+        """
+        এখানে ডাইনামিক ফিল্টারিং এবং সার্চ হ্যান্ডেল করা হচ্ছে।
+        """
+        queryset = Product.objects.all().order_by('-created_at')
+        
+        # ইউআরএল থেকে সার্চ টার্ম নেওয়া হচ্ছে (যেমন: ?search=মধু)
+        search_query = self.request.query_params.get('search', None)
+        
+        if search_query:
+            # নাম, ডেসক্রিপশন অথবা বারকোড নম্বর দিয়ে সার্চ করবে
+            queryset = queryset.filter(
+                Q(name__icontains=search_query) | 
+                Q(description__icontains=search_query) |
+                Q(barcode_number__icontains=search_query)
+            )
+            
+        return queryset
+
     def get_permissions(self):
+        """
+        অ্যাডমিন ছাড়া অন্য কেউ প্রোডাক্ট তৈরি বা এডিট করতে পারবে না।
+        """
         if self.action in ['create', 'update', 'partial_update', 'destroy']:
             return [permissions.IsAdminUser()]
+        # list, retrieve এবং get_by_barcode সবাই অ্যাক্সেস করতে পারবে
         return [permissions.AllowAny()]
 
-# --- নতুন কার্ট সিঙ্ক এপিআই ---
+    # ২. বারকোড দিয়ে প্রোডাক্ট খোঁজার কাস্টম এপিআই (যেমন: /api/products/get_by_barcode/?code=123)
+    @action(detail=False, methods=['get'])
+    def get_by_barcode(self, request):
+        barcode = request.query_params.get('code')
+        
+        if not barcode:
+            return Response({"error": "বারকোড পাওয়া যায়নি!"}, status=status.HTTP_400_BAD_REQUEST)
 
+        try:
+            # শুধুমাত্র অ্যাক্টিভ প্রোডাক্ট বারকোড দিয়ে খোঁজা হচ্ছে
+            product = Product.objects.get(barcode_number=barcode, is_active=True)
+            # সিরিয়ালাইজার কনটেক্সটে রিকোয়েস্ট পাঠানো হচ্ছে যাতে ইমেজ ইউআরএল ঠিক থাকে
+            serializer = self.get_serializer(product)
+            return Response(serializer.data)
+        except Product.DoesNotExist:
+            return Response({"error": "এই বারকোডের কোনো প্রোডাক্ট সিস্টেমে নেই!"}, status=status.HTTP_404_NOT_FOUND)
 
 class CartSyncView(APIView):
     permission_classes = [permissions.AllowAny]
@@ -41,7 +84,6 @@ class CartSyncView(APIView):
         product_ids = request.data.get('ids', [])
         products = Product.objects.filter(id__in=product_ids)
         
-        # ইউজার অ্যাক্টিভ কি না তা স্ট্রিং চেক করে নিশ্চিত করা
         is_active = False
         if request.user.is_authenticated:
             u_status = ""
@@ -58,8 +100,12 @@ class CartSyncView(APIView):
             base_price = float(p.price)
             pv = float(p.point_value or 0)
             
-            # ডিসকাউন্ট লজিক এপ্লাই
-            final_price = (base_price - pv) if is_active else base_price
+            # ✅ ডিসকাউন্ট লজিক আপডেট: ১ পয়েন্ট = ২ টাকা অফার
+            if is_active:
+                discount = pv * 2
+                final_price = base_price - discount
+            else:
+                final_price = base_price
 
             data.append({
                 "id": p.id,

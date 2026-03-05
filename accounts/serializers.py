@@ -48,6 +48,28 @@ class UserProfileSerializer(serializers.ModelSerializer):
         ]
         read_only_fields = ['username', 'email', 'balance', 'points', 'reff_id', 'placement_id', 'role']
 
+class UserProfileUpdateSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = User
+        fields = ['name', 'email', 'phone', 'profile_picture', 'password']
+        extra_kwargs = {
+            'password': {'write_only': True, 'required': False},
+            'email': {'required': False},
+            'phone': {'required': False},
+        }
+
+    def update(self, instance, validated_data):
+        password = validated_data.pop('password', None)
+        if password:
+            instance.set_password(password) # পাসওয়ার্ড হ্যাশ করে সেভ করবে
+        
+        # বাকি ফিল্ডগুলো আপডেট করা
+        for attr, value in validated_data.items():
+            setattr(instance, attr, value)
+            
+        instance.save()
+        return instance
+    
 class UserListSerializer(serializers.ModelSerializer):
     reff_id_input = serializers.CharField(write_only=True, required=False, allow_blank=True)
     placement_id_input = serializers.CharField(write_only=True, required=False, allow_blank=True)
@@ -68,6 +90,11 @@ class RegisterSerializer(serializers.ModelSerializer):
     reff_code_input = serializers.CharField(write_only=True, required=False, allow_blank=True)
     placement_id_input = serializers.CharField(write_only=True, required=False, allow_blank=True)
     position_input = serializers.CharField(write_only=True, required=False, allow_blank=True)
+    
+    # এই ফিল্ডগুলোকে আমরা অপশনাল করে দিচ্ছি
+    email = serializers.EmailField(required=False, allow_null=True, allow_blank=True)
+    phone = serializers.CharField(required=True) # ফোন নম্বর আমরা মাস্ট রাখছি (তোর রিকোয়ারমেন্ট অনুযায়ী)
+    division = serializers.CharField(required=False, allow_blank=True)
 
     class Meta:
         model = User
@@ -75,29 +102,39 @@ class RegisterSerializer(serializers.ModelSerializer):
             'username', 'password', 'email', 'phone', 'division', 
             'reff_code_input', 'placement_id_input', 'position_input'
         )
-        extra_kwargs = {'password': {'write_only': True}}
+        extra_kwargs = {
+            'password': {'write_only': True},
+            'username': {'required': True}
+        }
 
     def create(self, validated_data):
         reff_code = validated_data.pop('reff_code_input', None)
         placement_code = validated_data.pop('placement_id_input', None)
         pos_input = validated_data.pop('position_input', None)
-        user_division = validated_data.get('division')
+        user_division = validated_data.get('division', '') # ডিফল্ট খালি স্ট্রিং
 
+        # ইউজার ক্রিয়েট (পাসওয়ার্ড অটো হ্যাশ হবে create_user এর মাধ্যমে)
         user = User.objects.create_user(**validated_data)
 
+        # ১. রেফারেল সেট করা
         if reff_code:
             referrer = User.objects.filter(reff_id=reff_code).first()
-            user.referred_by = referrer
+            if referrer:
+                user.referred_by = referrer
 
+        # ২. প্লেসমেন্ট সেট করা
         if placement_code:
             placer = User.objects.filter(placement_id=placement_code).first()
             if placer:
                 user.placement_under = placer
+                # পজিশন চেক
                 if pos_input in ['left', 'right']:
                     user.position = pos_input
                 else:
                     existing_left = User.objects.filter(placement_under=placer, position='left').exists()
                     user.position = 'left' if not existing_left else 'right'
+        
+        # ৩. যদি প্লেসমেন্ট কোড না থাকে কিন্তু রেফারার থাকে, তবে অটো প্লেসমেন্ট হবে
         elif user.referred_by:
             parent, pos = find_auto_placement_with_division(user.referred_by, user_division)
             if parent:

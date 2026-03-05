@@ -78,10 +78,12 @@ MIDDLEWARE = [
 ]
 
 ROOT_URLCONF = 'config.urls'
-CORS_ALLOWED_ORIGINS = [
-    "https://sofol-bangla-frontend.vercel.app",
-    "http://localhost:3000",
-]
+CORS_ALLOW_ALL_ORIGINS = True # টেস্টিং এর জন্য এটা সাময়িকভাবে True করে দেখতে পারিস
+CORS_ALLOW_CREDENTIALS = True
+# CORS_ALLOWED_ORIGINS = [
+#     "https://sofol-bangla-frontend.vercel.app",
+#     "http://localhost:3000",
+# ]
 MEDIA_URL = '/media/'
 MEDIA_ROOT = os.path.join(BASE_DIR, 'media')
 
