@@ -61,21 +61,24 @@ class ProductViewSet(viewsets.ModelViewSet):
         return [permissions.AllowAny()]
 
     # ২. বারকোড দিয়ে প্রোডাক্ট খোঁজার কাস্টম এপিআই (যেমন: /api/products/get_by_barcode/?code=123)
-    @action(detail=False, methods=['get'])
+    @action(detail=False, methods=['get'], url_path='get_by_barcode')
     def get_by_barcode(self, request):
         barcode = request.query_params.get('code')
         
         if not barcode:
-            return Response({"error": "বারকোড পাওয়া যায়নি!"}, status=status.HTTP_400_BAD_REQUEST)
+            return Response({"error": "বারকোড পাওয়া যায়নি!"}, status=status.HTTP_400_BAD_REQUEST)
 
         try:
-            # শুধুমাত্র অ্যাক্টিভ প্রোডাক্ট বারকোড দিয়ে খোঁজা হচ্ছে
-            product = Product.objects.get(barcode_number=barcode, is_active=True)
-            # সিরিয়ালাইজার কনটেক্সটে রিকোয়েস্ট পাঠানো হচ্ছে যাতে ইমেজ ইউআরএল ঠিক থাকে
+            # এখানে filter ব্যবহার করে .first() নেওয়া নিরাপদ
+            product = Product.objects.filter(barcode_number=barcode, is_active=True).first()
+            
+            if not product:
+                return Response({"error": "এই বারকোডের কোনো প্রোডাক্ট সিস্টেমে নেই!"}, status=status.HTTP_404_NOT_FOUND)
+                
             serializer = self.get_serializer(product)
             return Response(serializer.data)
-        except Product.DoesNotExist:
-            return Response({"error": "এই বারকোডের কোনো প্রোডাক্ট সিস্টেমে নেই!"}, status=status.HTTP_404_NOT_FOUND)
+        except Exception as e:
+            return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 class CartSyncView(APIView):
     permission_classes = [permissions.AllowAny]

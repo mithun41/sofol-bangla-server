@@ -173,3 +173,4 @@ CSRF_TRUSTED_ORIGINS = ["https://sofol-bangla-frontend.vercel.app"]
 
 # প্রোডাকশনে এটাকে False করে দিবি যখন কাজ শেষ হবে
 DEBUG = True
+APPEND_SLASH = True
