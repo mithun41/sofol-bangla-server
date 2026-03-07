@@ -25,6 +25,7 @@ class ProductSerializer(serializers.ModelSerializer):
     category_name = serializers.ReadOnlyField(source='category.name')
     # নতুন একটা ফিল্ড যোগ করছি যা ফ্রন্টএন্ডে ডিসকাউন্ট প্রাইস দেখাবে
     discounted_price = serializers.SerializerMethodField()
+    is_active = serializers.BooleanField(default=True, required=False)
 
     class Meta:
         model = Product
