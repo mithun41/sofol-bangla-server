@@ -33,71 +33,73 @@ class RegisterView(generics.CreateAPIView):
     authentication_classes = []
 
     def create(self, request, *args, **kwargs):
-        # ১. সিরিয়ালাইজার দিয়ে ডাটা ভ্যালিডেট করা
+        # ১. সিরিয়ালাইজার ভ্যালিডেশন (ইউজারনেম/ফোন ডুপ্লিকেট হলে এখানেই এরর দিবে)
         serializer = self.get_serializer(data=request.data)
         if not serializer.is_valid():
+            # এটি সরাসরি {"username": ["Already exists"], "phone": ["Invalid"]} ফরম্যাটে এরর দিবে
             return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
         data = request.data
-        
-        # বাধ্যতামূলক ফিল্ডগুলো চেক (নিরাপত্তার জন্য ভিউতেও একবার চেক করে নেওয়া ভালো)
-        username = data.get('username')
-        phone = data.get('phone')
-        password = data.get('password')
-
-        if not username or not phone or not password:
-            return Response({"error": "Username, Phone and Password are required!"}, status=status.HTTP_400_BAD_REQUEST)
-
-        # অপশনাল ফিল্ডগুলো (না থাকলে ব্ল্যাঙ্ক বা ডিফল্ট বসবে)
         user_division = data.get('division', '') 
-        email = data.get('email', None) # ইমেইল না থাকলে None যাবে
-        name = data.get('name', '')
         reff_id = data.get('reff_id')
-        
-        referrer = None
-
-        # ২. রেফারেল আইডি চেক (যদি থাকে)
-        if reff_id:
-            try:
-                referrer = User.objects.get(reff_id=reff_id)
-            except User.DoesNotExist:
-                return Response({"reff_id": ["Invalid Referral ID."]}, status=status.HTTP_400_BAD_REQUEST)
-
-        # ৩. প্লেসমেন্ট এবং পজিশন লজিক
         placement_id = data.get('placement_id')
         position = data.get('position')
+        
+        referrer = None
         final_parent = None
         final_pos = None
 
-        # লজিক: যদি প্লেসমেন্ট আইডি থাকে তবে সেটা ধরবে, নাহলে রেফারারের আন্ডারে অটো যাবে
+        # ২. রেফারেল আইডি ভ্যালিডেশন
+        if reff_id:
+            referrer = User.objects.filter(reff_id=reff_id).first()
+            if not referrer:
+                return Response({
+                    "reff_id": ["Invalid Referral ID. User not found."]
+                }, status=status.HTTP_400_BAD_REQUEST)
+
+        # ৩. প্লেসমেন্ট আইডি ভ্যালিডেশন
         if placement_id:
-            try:
-                target_parent = User.objects.get(placement_id=placement_id)
-                if position and not User.objects.filter(placement_under=target_parent, position=position).exists():
-                    final_parent, final_pos = target_parent, position
-                else:
-                    final_parent, final_pos = find_auto_placement_with_division(target_parent, user_division)
-            except User.DoesNotExist:
-                return Response({"placement_id": ["Invalid Placement ID."]}, status=status.HTTP_400_BAD_REQUEST)
+            target_parent = User.objects.filter(placement_id=placement_id).first()
+            if not target_parent:
+                return Response({
+                    "placement_id": ["Placement ID not found in our records."]
+                }, status=status.HTTP_400_BAD_REQUEST)
+            
+            # ৪. পজিশন অকুপাইড কি না চেক
+            if position:
+                if position not in ['left', 'right']:
+                    return Response({
+                        "position": ["Position must be 'left' or 'right'."]
+                    }, status=status.HTTP_400_BAD_REQUEST)
+                
+                is_occupied = User.objects.filter(placement_under=target_parent, position=position).exists()
+                if is_occupied:
+                    return Response({
+                        "position": [f"The {position} side under this ID is already occupied."]
+                    }, status=status.HTTP_400_BAD_REQUEST)
+                
+                final_parent, final_pos = target_parent, position
+            else:
+                # পজিশন না দিলে অটো প্লেসমেন্ট
+                final_parent, final_pos = find_auto_placement_with_division(target_parent, user_division)
         
         elif referrer:
             final_parent, final_pos = find_auto_placement_with_division(referrer, user_division)
         
         else:
-            # একদম রুট ইউজার (অ্যাডমিন) আন্ডারে যাবে যদি কেউ না থাকে
             root_user = User.objects.filter(is_superuser=True).first()
             if root_user:
                 final_parent, final_pos = find_auto_placement_with_division(root_user, user_division)
 
-        # ৪. ইউজার তৈরি করা (Atomic Transaction)
+        # ৫. ইউজার তৈরি করা (Atomic Transaction)
         try:
             with transaction.atomic():
                 user = User.objects.create_user(
-                    username=username,
-                    email=email, # এটা এখন অপশনাল
-                    password=password,
-                    phone=phone,
-                    name=name,
+                    username=data.get('username'),
+                    email=data.get('email'),
+                    password=data.get('password'),
+                    phone=data.get('phone'),
+                    name=data.get('name', ''),
                     division=user_division, 
                     referred_by=referrer,
                     placement_under=final_parent,
@@ -106,17 +108,19 @@ class RegisterView(generics.CreateAPIView):
                 )
                 
                 return Response({
-                    "message": "User registered successfully!",
+                    "status": "success",
+                    "message": "Registration successful!",
                     "user_info": {
                         "username": user.username,
-                        "placement_under": final_parent.username if final_parent else "None",
-                        "position": final_pos,
                         "reff_id": user.reff_id
                     }
                 }, status=status.HTTP_201_CREATED)
 
         except Exception as e:
-            return Response({"general": [str(e)]}, status=status.HTTP_400_BAD_REQUEST)
+            # ডাটাবেজ লেভেলের কোনো এরর হলে সেটা জেনেরিক ফিল্ডে পাঠানো
+            return Response({
+                "non_field_errors": [str(e)]
+            }, status=status.HTTP_400_BAD_REQUEST)
         
 class UserProfileView(APIView):
     permission_classes = [IsAuthenticated]

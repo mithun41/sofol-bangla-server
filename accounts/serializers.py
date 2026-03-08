@@ -5,6 +5,7 @@ from .services import find_auto_placement_with_division
 from decimal import Decimal
 from django.db import transaction
 from .models import GlobalFund, FundLog
+from rest_framework.validators import UniqueValidator
 
 
 # ১. লগইন করার সময় সব ডাটা একসাথে পাঠানোর জন্য কাস্টম সিরিয়ালাইজার
@@ -87,13 +88,28 @@ class UserListSerializer(serializers.ModelSerializer):
         )
 
 class RegisterSerializer(serializers.ModelSerializer):
+    # Added UniqueValidator to catch duplicate entries before they hit the database
+    username = serializers.CharField(
+        required=True,
+        validators=[UniqueValidator(
+            queryset=User.objects.all(), 
+            message="This username is already taken."
+        )]
+    )
+    
+    phone = serializers.CharField(
+        required=True,
+        validators=[UniqueValidator(
+            queryset=User.objects.all(), 
+            message="This phone number is already registered."
+        )]
+    )
+
     reff_code_input = serializers.CharField(write_only=True, required=False, allow_blank=True)
     placement_id_input = serializers.CharField(write_only=True, required=False, allow_blank=True)
     position_input = serializers.CharField(write_only=True, required=False, allow_blank=True)
     
-    # এই ফিল্ডগুলোকে আমরা অপশনাল করে দিচ্ছি
     email = serializers.EmailField(required=False, allow_null=True, allow_blank=True)
-    phone = serializers.CharField(required=True) # ফোন নম্বর আমরা মাস্ট রাখছি (তোর রিকোয়ারমেন্ট অনুযায়ী)
     division = serializers.CharField(required=False, allow_blank=True)
 
     class Meta:
@@ -104,37 +120,46 @@ class RegisterSerializer(serializers.ModelSerializer):
         )
         extra_kwargs = {
             'password': {'write_only': True},
-            'username': {'required': True}
         }
+
+    # Custom field validation for Referral and Placement IDs
+    def validate_reff_code_input(self, value):
+        if value and not User.objects.filter(reff_id=value).exists():
+            raise serializers.ValidationError("Invalid Referral ID. User not found.")
+        return value
+
+    def validate_placement_id_input(self, value):
+        if value and not User.objects.filter(placement_id=value).exists():
+            raise serializers.ValidationError("Placement ID not found in our records.")
+        return value
 
     def create(self, validated_data):
         reff_code = validated_data.pop('reff_code_input', None)
         placement_code = validated_data.pop('placement_id_input', None)
         pos_input = validated_data.pop('position_input', None)
-        user_division = validated_data.get('division', '') # ডিফল্ট খালি স্ট্রিং
+        user_division = validated_data.get('division', '')
 
-        # ইউজার ক্রিয়েট (পাসওয়ার্ড অটো হ্যাশ হবে create_user এর মাধ্যমে)
+        # User creation using the model manager
         user = User.objects.create_user(**validated_data)
 
-        # ১. রেফারেল সেট করা
+        # 1. Set Referrer
         if reff_code:
             referrer = User.objects.filter(reff_id=reff_code).first()
             if referrer:
                 user.referred_by = referrer
 
-        # ২. প্লেসমেন্ট সেট করা
+        # 2. Set Placement
         if placement_code:
             placer = User.objects.filter(placement_id=placement_code).first()
             if placer:
                 user.placement_under = placer
-                # পজিশন চেক
                 if pos_input in ['left', 'right']:
                     user.position = pos_input
                 else:
                     existing_left = User.objects.filter(placement_under=placer, position='left').exists()
                     user.position = 'left' if not existing_left else 'right'
         
-        # ৩. যদি প্লেসমেন্ট কোড না থাকে কিন্তু রেফারার থাকে, তবে অটো প্লেসমেন্ট হবে
+        # 3. Auto-placement logic if only referrer is provided
         elif user.referred_by:
             parent, pos = find_auto_placement_with_division(user.referred_by, user_division)
             if parent:
