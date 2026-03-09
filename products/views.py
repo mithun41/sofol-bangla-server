@@ -8,19 +8,16 @@ from .models import Product, Category, Cart
 from django.db.models import Q 
 
 class CategoryViewSet(viewsets.ModelViewSet):
+    queryset = Category.objects.all()
     serializer_class = CategorySerializer
-
+    
     def get_queryset(self):
-        # ডিফল্ট কুয়েরিসেট (সব সময় শুধু মেইন ক্যাটাগরিগুলো রিটার্ন করবে)
-        queryset = Category.objects.filter(parent__isnull=True).prefetch_related('subcategories')
-        
-        # যদি আপনি কখনো সব ক্যাটাগরি (ফ্ল্যাট লিস্ট) দেখতে চান, তবে ?all=true দিয়ে দেখতে পারবেন
-        show_all = self.request.query_params.get('all')
-        if show_all == 'true':
-            return Category.objects.all()
-            
+        queryset = Category.objects.all()
+        is_main = self.request.query_params.get('main')
+        if is_main == 'true':
+            return queryset.filter(parent__isnull=True)
         return queryset
-
+    
     def get_permissions(self):
         if self.action in ['create', 'update', 'partial_update', 'destroy']:
             return [permissions.IsAdminUser()]
