@@ -18,7 +18,11 @@ class CategorySerializer(serializers.ModelSerializer):
 
     def get_subcategories(self, obj):
         # যদি এই ক্যাটাগরির আন্ডারে কোনো সাব-ক্যাটাগরি থাকে তবে সেগুলো দেখাবে
-        serializer = CategorySerializer(obj.subcategories.all(), many=True)
+        serializer = CategorySerializer(
+            obj.subcategories.all(), 
+            many=True, 
+            context={'request': self.context.get('request')}
+        )
         return serializer.data
 
 class ProductSerializer(serializers.ModelSerializer):
