@@ -80,7 +80,7 @@ class UserListSerializer(serializers.ModelSerializer):
     class Meta:
         model = User
         fields = (
-            'id', 'username', 'email', 'phone', 'reff_id', 'placement_id', 
+            'id','name', 'username', 'email', 'phone', 'reff_id', 'placement_id', 
             'points', 'balance', 'position', 'left_count', 'right_count',
             'referred_by_username', 'placement_under_username', 
             'reff_id_input', 'placement_id_input',
