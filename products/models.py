@@ -34,7 +34,13 @@ class Category(models.Model):
         verbose_name_plural = "Categories"
 
 class Product(models.Model):
-    category = models.ForeignKey(Category, on_delete=models.CASCADE, related_name='products')
+    category = models.ForeignKey(
+    Category, 
+    on_delete=models.SET_NULL,  
+    related_name='products',
+    null=True,                  
+    blank=True                  
+)
     name = models.CharField(max_length=255)
     description = models.TextField()
     
