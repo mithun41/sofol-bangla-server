@@ -129,40 +129,60 @@ class CartSyncView(APIView):
 
 
 
-# এটি CartViewSet এর ভেতরে যাবে, CategoryViewSet এ নয়!
 class CartViewSet(viewsets.ModelViewSet):
     serializer_class = CartSerializer
     permission_classes = [permissions.IsAuthenticated]
 
     def get_queryset(self):
+        # Only show cart items for the currently logged-in user
         return Cart.objects.filter(user=self.request.user)
 
-    # ১. নির্দিষ্ট একটি আইটেম ডিলিট করার রেসপন্স ফিক্স
+    def get_serializer_context(self):
+        context = super().get_serializer_context()
+        context.update({"request": self.request})
+        return context
+
+    def perform_create(self, serializer):
+        product = serializer.validated_data.get('product')
+        quantity = serializer.validated_data.get('quantity', 1)
+        cart_item = Cart.objects.filter(user=self.request.user, product=product).first()
+
+        if cart_item:
+            cart_item.quantity += quantity
+            cart_item.save()
+        else:
+            serializer.save(user=self.request.user)
+
+    def list(self, request, *args, **kwargs):
+        queryset = self.get_queryset()
+        serializer = self.get_serializer(queryset, many=True)
+        return Response(serializer.data)
+
+    # 1. Response for deleting a specific item
     def destroy(self, request, *args, **kwargs):
         instance = self.get_object()
         product_name = instance.product.name
         self.perform_destroy(instance)
         return Response({
             "status": "success",
-            "message": f"'{product_name}' কার্ট থেকে সরানো হয়েছে।"
+            "message": f"Item '{product_name}' removed from cart successfully."
         }, status=status.HTTP_200_OK)
 
-    # ২. পুরো কার্ট খালি করার অ্যাকশন
+    # 2. Response for clearing the whole cart
     @action(detail=False, methods=['delete'])
     def clear(self, request):
-        """ইউআরএল: /api/products/cart/clear/"""
-        cart_items = Cart.objects.filter(user=request.user)
-        count = cart_items.count()
+        """URL: /api/products/cart/clear/"""
+        cart_query = Cart.objects.filter(user=request.user)
+        count = cart_query.count()
         
         if count > 0:
-            cart_items.delete()
+            cart_query.delete()
             return Response({
                 "status": "success",
-                "message": "আপনার কার্ট এখন সম্পূর্ণ খালি!",
-                "deleted_items": count
+                "message": "Cart cleared successfully.",
+                "deleted_count": count
             }, status=status.HTTP_200_OK)
         
         return Response({
-            "status": "info",
-            "message": "আপনার কার্টে কোনো আইটেম নেই।"
+            "message": "Cart is  empty."
         }, status=status.HTTP_200_OK)
