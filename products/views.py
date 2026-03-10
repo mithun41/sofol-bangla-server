@@ -129,48 +129,40 @@ class CartSyncView(APIView):
 
 
 
+# এটি CartViewSet এর ভেতরে যাবে, CategoryViewSet এ নয়!
 class CartViewSet(viewsets.ModelViewSet):
     serializer_class = CartSerializer
     permission_classes = [permissions.IsAuthenticated]
 
     def get_queryset(self):
-        # শুধুমাত্র বর্তমান ইউজারের কার্ট আইটেমগুলো দেখাবে
         return Cart.objects.filter(user=self.request.user)
 
-    def get_serializer_context(self):
-        # সিরিয়ালাইজারের ভেতর রিকোয়েস্ট অবজেক্ট পাঠানোর জন্য (ইমেজ ইউআরএল এবং ডিসকাউন্ট ক্যালকুলেশনের জন্য জরুরি)
-        context = super().get_serializer_context()
-        context.update({"request": self.request})
-        return context
-
-    def perform_create(self, serializer):
-        # কার্টে নতুন প্রোডাক্ট অ্যাড করার সময় যদি অলরেডি থাকে তবে কোয়ান্টিটি বাড়িয়ে দেবে
-        product = serializer.validated_data.get('product')
-        quantity = serializer.validated_data.get('quantity', 1)
-        cart_item = Cart.objects.filter(user=self.request.user, product=product).first()
-
-        if cart_item:
-            cart_item.quantity += quantity
-            cart_item.save()
-        else:
-            serializer.save(user=self.request.user)
-
-    def list(self, request, *args, **kwargs):
-        # তোর রিকোয়ারমেন্ট অনুযায়ী সরাসরি Array (লিস্ট) রিটার্ন করবে
-        queryset = self.get_queryset()
-        serializer = self.get_serializer(queryset, many=True)
-        return Response(serializer.data)
-
+    # ১. নির্দিষ্ট একটি আইটেম ডিলিট করার রেসপন্স ফিক্স
     def destroy(self, request, *args, **kwargs):
-        # কার্ট থেকে আইটেম রিমুভ করার জন্য
         instance = self.get_object()
+        product_name = instance.product.name
         self.perform_destroy(instance)
-        return Response(status=status.HTTP_204_NO_CONTENT)
-            
-    
+        return Response({
+            "status": "success",
+            "message": f"'{product_name}' কার্ট থেকে সরানো হয়েছে।"
+        }, status=status.HTTP_200_OK)
 
+    # ২. পুরো কার্ট খালি করার অ্যাকশন
     @action(detail=False, methods=['delete'])
     def clear(self, request):
-        """পুরো কার্ট খালি করার জন্য: /api/products/cart/clear/"""
-        Cart.objects.filter(user=request.user).delete()
-        return Response({"message": "Cart cleared successfully"}, status=status.HTTP_204_NO_CONTENT)
+        """ইউআরএল: /api/products/cart/clear/"""
+        cart_items = Cart.objects.filter(user=request.user)
+        count = cart_items.count()
+        
+        if count > 0:
+            cart_items.delete()
+            return Response({
+                "status": "success",
+                "message": "আপনার কার্ট এখন সম্পূর্ণ খালি!",
+                "deleted_items": count
+            }, status=status.HTTP_200_OK)
+        
+        return Response({
+            "status": "info",
+            "message": "আপনার কার্টে কোনো আইটেম নেই।"
+        }, status=status.HTTP_200_OK)
