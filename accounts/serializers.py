@@ -258,64 +258,78 @@ def deduct_from_fund(primary_fund_name, amount):
 
 
 class ForgotPasswordSerializer(serializers.Serializer):
+    username = serializers.CharField(required=True)
     phone = serializers.CharField(required=True)
 
+    def validate(self, data):
+        # Checking if a user exists with this specific username AND phone
+        if not User.objects.filter(username=data['username'], phone=data['phone']).exists():
+            raise serializers.ValidationError("No account found with this username and phone number.")
+        return data
+
     def generate_otp(self):
+        username = self.validated_data['username']
         phone = self.validated_data['phone']
-        user = User.objects.get(phone=phone)
         
-        # Generating 6-digit OTP
+        # Now we target the specific user uniquely
+        user = User.objects.get(username=username, phone=phone)
+        
         otp_code = str(random.randint(100000, 999999))
         user.otp = otp_code
         user.otp_expiry = timezone.now() + timedelta(minutes=5)
         user.save()
 
-        # Calling GreenWeb API
         self.send_greenweb_sms(phone, otp_code)
-        
         return otp_code
 
     def send_greenweb_sms(self, phone, otp):
-        # GreenWeb API Credentials
         token = "816302462035b3e9a8b7d749d660d03d3610af4c65"
         to = phone if phone.startswith('88') else f"88{phone}"
-        message = f"[MyProject] Your verification code is {otp}"
+        message = f"Your OTP for username {self.validated_data['username']} is {otp}"
 
-        # GreenWeb API URL
         url = "http://api.greenweb.com.bd/api.php"
-        
-        payload = {
-            "token": token,
-            "to": to,
-            "message": message
-        }
+        payload = {"token": token, "to": to, "message": message}
 
         try:
-            # GreenWeb uses GET or POST. POST is safer for long messages.
             response = requests.post(url, data=payload, timeout=10)
-            # Check terminal to see if SMS was sent successfully
             print(f"GreenWeb Response: {response.text}")
         except Exception as e:
             print(f"GreenWeb Connection Error: {str(e)}")
     
 class ResetPasswordSerializer(serializers.Serializer):
+    username = serializers.CharField(required=True) # Identifying the specific account
     phone = serializers.CharField(required=True)
     otp = serializers.CharField(required=True)
     new_password = serializers.CharField(required=True, min_length=6)
 
     def validate(self, data):
-        user = User.objects.filter(phone=data['phone'], otp=data['otp']).first()
+        # Searching for the specific user with username, phone, AND otp
+        user = User.objects.filter(
+            username=data['username'], 
+            phone=data['phone'], 
+            otp=data['otp']
+        ).first()
+
         if not user:
-            raise serializers.ValidationError("Invalid OTP or Phone number.")
+            raise serializers.ValidationError("Invalid details. Check your username, phone, or OTP.")
         
-        if user.otp_expiry < timezone.now():
-            raise serializers.ValidationError("OTP has expired.")
+        # Checking if OTP is expired
+        if user.otp_expiry and user.otp_expiry < timezone.now():
+            raise serializers.ValidationError("OTP has expired. Please request a new one.")
             
         return data
 
     def save(self):
-        user = User.objects.get(phone=self.validated_data['phone'])
-        user.set_password(self.validated_data['new_password'])
+        # Extracting validated data
+        username = self.validated_data['username']
+        phone = self.validated_data['phone']
+        new_password = self.validated_data['new_password']
+
+        # Targeting the exact user to update
+        user = User.objects.get(username=username, phone=phone)
+        user.set_password(new_password)
+        
+        # Clearing OTP fields after successful reset
         user.otp = None 
         user.otp_expiry = None
         user.save()
