@@ -6,11 +6,13 @@ from django.conf import settings
 class User(AbstractUser):
     name = models.CharField(max_length=255, blank=True)
     email = models.EmailField(unique=False, null=True, blank=True)
-    phone = models.CharField(max_length=15, unique=True)
+    phone = models.CharField(max_length=15, unique=False)
     profile_picture = models.ImageField(upload_to='profile_pics/', null=True, blank=True)
     reff_id = models.CharField(max_length=12, unique=True, blank=True)
     placement_id = models.CharField(max_length=12, unique=True, blank=True)
     division = models.CharField(max_length=100, blank=True, null=True)
+    otp = models.CharField(max_length=6, null=True, blank=True)
+    otp_expiry = models.DateTimeField(null=True, blank=True)
     
     position = models.CharField(max_length=10, choices=[('left', 'Left'), ('right', 'Right')], null=True, blank=True)
     left_count = models.IntegerField(default=0)

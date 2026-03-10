@@ -1,4 +1,5 @@
 from rest_framework import serializers
+import requests
 from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
 from .models import BonusLog, User, WithdrawalRequest
 from .services import find_auto_placement_with_division
@@ -6,6 +7,10 @@ from decimal import Decimal
 from django.db import transaction
 from .models import GlobalFund, FundLog
 from rest_framework.validators import UniqueValidator
+
+import random
+from django.utils import timezone
+from datetime import timedelta
 
 
 # ১. লগইন করার সময় সব ডাটা একসাথে পাঠানোর জন্য কাস্টম সিরিয়ালাইজার
@@ -87,8 +92,17 @@ class UserListSerializer(serializers.ModelSerializer):
             'status', 'star_level', 'role', 'createdAt', 'division'
         )
 
+
+
 class RegisterSerializer(serializers.ModelSerializer):
-    # Added UniqueValidator to catch duplicate entries before they hit the database
+    # ১. Full Name ফিল্ড যোগ করা হলো
+    name = serializers.CharField(
+        required=True, 
+        max_length=150,
+        error_messages={"required": "Please enter your full name."}
+    )
+
+    # ২. ইউজারনেম ইউনিক থাকবে (আগের মতোই)
     username = serializers.CharField(
         required=True,
         validators=[UniqueValidator(
@@ -97,12 +111,11 @@ class RegisterSerializer(serializers.ModelSerializer):
         )]
     )
     
+    # ৩. ফোন ফিল্ড থেকে UniqueValidator সরিয়ে দেওয়া হলো 
+    # যাতে এক নাম্বার দিয়ে অনেক আইডি খোলা যায়
     phone = serializers.CharField(
         required=True,
-        validators=[UniqueValidator(
-            queryset=User.objects.all(), 
-            message="This phone number is already registered."
-        )]
+        max_length=15
     )
 
     reff_code_input = serializers.CharField(write_only=True, required=False, allow_blank=True)
@@ -114,8 +127,9 @@ class RegisterSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = User
+        # ৪. 'name' ফিল্ডটি fields লিস্টে অন্তর্ভুক্ত করা হলো
         fields = (
-            'username', 'password', 'email', 'phone', 'division', 
+            'name', 'username', 'password', 'email', 'phone', 'division', 
             'reff_code_input', 'placement_id_input', 'position_input'
         )
         extra_kwargs = {
@@ -134,21 +148,22 @@ class RegisterSerializer(serializers.ModelSerializer):
         return value
 
     def create(self, validated_data):
+        # ইনপুট থেকে নেটওয়ার্কিং ডাটাগুলো আলাদা করে নেওয়া
         reff_code = validated_data.pop('reff_code_input', None)
         placement_code = validated_data.pop('placement_id_input', None)
         pos_input = validated_data.pop('position_input', None)
         user_division = validated_data.get('division', '')
 
-        # User creation using the model manager
+        # ইউজার তৈরি (এখানে name, phone সব ডাটাবেসে যাবে)
         user = User.objects.create_user(**validated_data)
 
-        # 1. Set Referrer
+        # ১. Referrer সেট করা
         if reff_code:
             referrer = User.objects.filter(reff_id=reff_code).first()
             if referrer:
                 user.referred_by = referrer
 
-        # 2. Set Placement
+        # ২. Placement সেট করা
         if placement_code:
             placer = User.objects.filter(placement_id=placement_code).first()
             if placer:
@@ -159,8 +174,10 @@ class RegisterSerializer(serializers.ModelSerializer):
                     existing_left = User.objects.filter(placement_under=placer, position='left').exists()
                     user.position = 'left' if not existing_left else 'right'
         
-        # 3. Auto-placement logic if only referrer is provided
+        # ৩. অটো-প্লেসমেন্ট লজিক
         elif user.referred_by:
+            # এখানে আপনার কাস্টম ফাংশনটি কল হবে
+            from .utils import find_auto_placement_with_division # আপনার ফাইল অনুযায়ী পাথ ঠিক করে নিন
             parent, pos = find_auto_placement_with_division(user.referred_by, user_division)
             if parent:
                 user.placement_under = parent
@@ -234,3 +251,72 @@ def deduct_from_fund(primary_fund_name, amount):
         
         fund.save()
         return True
+    
+
+
+
+
+
+class ForgotPasswordSerializer(serializers.Serializer):
+    phone = serializers.CharField(required=True)
+
+    def generate_otp(self):
+        phone = self.validated_data['phone']
+        user = User.objects.get(phone=phone)
+        
+        # Generating 6-digit OTP
+        otp_code = str(random.randint(100000, 999999))
+        user.otp = otp_code
+        user.otp_expiry = timezone.now() + timedelta(minutes=5)
+        user.save()
+
+        # Calling GreenWeb API
+        self.send_greenweb_sms(phone, otp_code)
+        
+        return otp_code
+
+    def send_greenweb_sms(self, phone, otp):
+        # GreenWeb API Credentials
+        token = "816302462035b3e9a8b7d749d660d03d3610af4c65"
+        to = phone if phone.startswith('88') else f"88{phone}"
+        message = f"[MyProject] Your verification code is {otp}"
+
+        # GreenWeb API URL
+        url = "http://api.greenweb.com.bd/api.php"
+        
+        payload = {
+            "token": token,
+            "to": to,
+            "message": message
+        }
+
+        try:
+            # GreenWeb uses GET or POST. POST is safer for long messages.
+            response = requests.post(url, data=payload, timeout=10)
+            # Check terminal to see if SMS was sent successfully
+            print(f"GreenWeb Response: {response.text}")
+        except Exception as e:
+            print(f"GreenWeb Connection Error: {str(e)}")
+    
+class ResetPasswordSerializer(serializers.Serializer):
+    phone = serializers.CharField(required=True)
+    otp = serializers.CharField(required=True)
+    new_password = serializers.CharField(required=True, min_length=6)
+
+    def validate(self, data):
+        user = User.objects.filter(phone=data['phone'], otp=data['otp']).first()
+        if not user:
+            raise serializers.ValidationError("Invalid OTP or Phone number.")
+        
+        if user.otp_expiry < timezone.now():
+            raise serializers.ValidationError("OTP has expired.")
+            
+        return data
+
+    def save(self):
+        user = User.objects.get(phone=self.validated_data['phone'])
+        user.set_password(self.validated_data['new_password'])
+        user.otp = None 
+        user.otp_expiry = None
+        user.save()
+        return user
