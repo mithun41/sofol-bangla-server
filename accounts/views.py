@@ -18,7 +18,7 @@ from accounts.services import (
 )
 from .models import BonusLog, FundLog, GlobalFund, User, WithdrawalRequest
 from .serializers import (
-    RegisterSerializer, UserListSerializer, UserProfileUpdateSerializer, WithdrawalSerializer, 
+    ForgotPasswordSerializer, RegisterSerializer, ResetPasswordSerializer, UserListSerializer, UserProfileUpdateSerializer, WithdrawalSerializer, 
     BonusLogSerializer
 )
 from django.db.models import Sum
@@ -486,3 +486,83 @@ class ChangePasswordView(APIView):
         user.set_password(new_password)
         user.save()
         return Response({"message": "Password changed successfully!"})
+    
+    
+
+
+
+
+from rest_framework.views import APIView
+from rest_framework.response import Response
+from rest_framework import status
+from rest_framework.permissions import AllowAny
+# Import your serializers here
+# from .serializers import ForgotPasswordSerializer, ResetPasswordSerializer
+
+class ForgotPasswordView(APIView):
+    """
+    Step 1: Request OTP for password reset
+    """
+    permission_classes = [AllowAny] # Essential to avoid 401 errors for guests
+
+    def post(self, request):
+        serializer = ForgotPasswordSerializer(data=request.data)
+        
+        if serializer.is_valid():
+            otp = serializer.generate_otp()
+            # Debugging in console
+            print(f"\n 🔥🔥🔥 [DEBUG OTP] Phone: {request.data.get('phone')} | OTP: {otp} \n")
+            
+            return Response({
+                "status": "success",
+                "message": "OTP has been sent to your phone number.",
+                "otp_debug": otp # Only for development phase
+            }, status=status.HTTP_200_OK)
+
+        # Better error handling: extract first error message
+        error_data = serializer.errors
+        first_error_key = list(error_data.keys())[0]
+        detailed_error = error_data[first_error_key][0]
+
+        return Response({
+            "status": "error",
+            "message": detailed_error,
+            "errors": error_data
+        }, status=status.HTTP_400_BAD_REQUEST)
+
+
+class ResetPasswordView(APIView):
+    """
+    Step 2: Verify OTP and update password
+    """
+    permission_classes = [AllowAny]
+
+    def post(self, request):
+        serializer = ResetPasswordSerializer(data=request.data)
+        
+        if serializer.is_valid():
+            serializer.save()
+            return Response({
+                "status": "success",
+                "message": "Password has been reset successfully. Please login with your new password."
+            }, status=status.HTTP_200_OK)
+        
+        # Logging errors for backend monitoring
+        print("Reset Error Details:", serializer.errors) 
+        
+        # Comprehensive error handling for frontend toast/alerts
+        error_data = serializer.errors
+        # Check if it's a validation error (like min_length) or general error
+        error_message = "Validation failed."
+        if 'non_field_errors' in error_data:
+            error_message = error_data['non_field_errors'][0]
+        elif error_data:
+            # Pick the first error from any field (like new_password or phone)
+            first_field = list(error_data.keys())[0]
+            error_message = f"{first_field.replace('_', ' ').capitalize()}: {error_data[first_field][0]}"
+
+        return Response({
+            "status": "error",
+            "message": error_message,
+            "errors": error_data
+        }, status=status.HTTP_400_BAD_REQUEST)
