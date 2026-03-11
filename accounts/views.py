@@ -10,7 +10,10 @@ from rest_framework_simplejwt.views import TokenObtainPairView
 from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
 from rest_framework_simplejwt.tokens import RefreshToken
 
-# accounts.services থেকে আমাদের লেটেস্ট লজিক
+# গুরুত্বপূর্ণ ইম্পোর্ট যা আপনার মিস ছিল (NameError ফিক্স করার জন্য)
+from rest_framework.parsers import MultiPartParser, FormParser, JSONParser
+
+# আপনার মডেল ও সার্ভিস ইম্পোর্ট
 from accounts.services import (
     calculate_commission, 
     update_user_rank, 
@@ -18,11 +21,11 @@ from accounts.services import (
 )
 from .models import BonusLog, FundLog, GlobalFund, User, WithdrawalRequest
 from .serializers import (
-    ForgotPasswordSerializer, RegisterSerializer, ResetPasswordSerializer, UserListSerializer, UserProfileUpdateSerializer, WithdrawalSerializer, 
+    ForgotPasswordSerializer, RegisterSerializer, ResetPasswordSerializer, 
+    UserListSerializer, UserProfileUpdateSerializer, WithdrawalSerializer, 
     BonusLogSerializer
 )
 from django.db.models import Sum
-from .models import FundLog # এটা ইম্পোর্ট করা নিশ্চিত কর
 
 # --- USER AUTH & PROFILE ---
 
