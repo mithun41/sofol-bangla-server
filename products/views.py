@@ -89,39 +89,32 @@ class CartSyncView(APIView):
         
         is_active = False
         if request.user.is_authenticated:
-            u_status = ""
-            if hasattr(request.user, 'profile'):
+            u_status = getattr(request.user, 'status', '').lower()
+            if not u_status and hasattr(request.user, 'profile'):
                 u_status = getattr(request.user.profile, 'status', '').lower()
-            elif hasattr(request.user, 'status'):
-                u_status = getattr(request.user, 'status', '').lower()
-            
             is_active = (u_status == 'active')
 
         data = []
         for p in products:
-            image_url = request.build_absolute_uri(p.image.url) if p.image else None
             base_price = float(p.price)
             pv = float(p.point_value or 0)
             
-            # ✅ ডিসকাউন্ট লজিক আপডেট: ১ পয়েন্ট = ২ টাকা অফার
             if is_active:
-                discount = pv * 2
-                final_price = base_price - discount
+                f_price = base_price - (pv * 2)
+                f_pv = 0
             else:
-                final_price = base_price
+                f_price = base_price
+                f_pv = pv
 
             data.append({
                 "id": p.id,
                 "name": p.name,
-                "product_price": final_price,
-                "image": image_url,
-                "product_pv": pv,
-                "stock_status": "in_stock" if (hasattr(p, 'stock') and p.stock > 0) else "available"
+                "product_price": f_price,
+                "product_pv": f_pv,
+                "image": request.build_absolute_uri(p.image.url) if p.image else None,
+                "stock_status": "in_stock" if p.stock > 0 else "out_of_stock"
             })
-            
-        return Response(data, status=status.HTTP_200_OK)
-    
-    
+        return Response(data)
 
 
 
