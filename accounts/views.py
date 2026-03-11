@@ -9,6 +9,7 @@ from rest_framework.decorators import api_view, permission_classes
 from rest_framework_simplejwt.views import TokenObtainPairView
 from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
 from rest_framework_simplejwt.tokens import RefreshToken
+from rest_framework.parsers import MultiPartParser, FormParser, JSONParser
 
 # গুরুত্বপূর্ণ ইম্পোর্ট যা আপনার মিস ছিল (NameError ফিক্স করার জন্য)
 from rest_framework.parsers import MultiPartParser, FormParser, JSONParser
