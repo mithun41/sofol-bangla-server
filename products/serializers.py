@@ -57,20 +57,25 @@ class ProductSerializer(serializers.ModelSerializer):
 
     def get_point_value(self, obj):
         request = self.context.get('request')
-        # মডেলে এখন IntegerField, তাই দশমিকের ভয় নেই
+        # মডেলে IntegerField থাকায় সরাসরি ভ্যালু নিচ্ছি
         current_pv = obj.point_value or 0
         
         if request and request.user.is_authenticated:
-            if not request.user.is_staff:
-                u_status = getattr(request.user, 'status', '').lower()
-                if not u_status and hasattr(request.user, 'profile'):
-                    u_status = getattr(request.user.profile, 'status', '').lower()
+            # অ্যাডমিন হলে অরিজিনাল পয়েন্ট নাম্বার হিসেবে যাবে
+            if request.user.is_staff:
+                return int(current_pv)
 
-                if u_status == 'active':
-                    return "0" # একটিভ ইউজারের জন্য স্ট্রিং হিসেবে ০
+            # মেম্বার চেক
+            u_status = getattr(request.user, 'status', '').lower()
+            if not u_status and hasattr(request.user, 'profile'):
+                u_status = getattr(request.user.profile, 'status', '').lower()
+
+            # একটিভ মেম্বার হলে ০ (নাম্বার হিসেবে)
+            if u_status == 'active':
+                return 0 
         
-        # রিটার্ন করবে স্ট্রিং হিসেবে কিন্তু পূর্ণসংখ্যা (যেমন: "10")
-        return str(int(current_pv))
+        # ডিফল্টভাবে পূর্ণসংখ্যা (Number) হিসেবে রিটার্ন করবে
+        return int(current_pv)
 
     def validate(self, data):
         """
