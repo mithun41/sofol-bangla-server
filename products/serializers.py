@@ -28,7 +28,6 @@ class CategorySerializer(serializers.ModelSerializer):
 class ProductSerializer(serializers.ModelSerializer):
     category_name = serializers.ReadOnlyField(source='category.name')
     
-    # এপিআই রেসপন্সে ডাইনামিক ভ্যালু দেখানোর জন্য
     price = serializers.SerializerMethodField()
     point_value = serializers.SerializerMethodField()
 
@@ -40,39 +39,38 @@ class ProductSerializer(serializers.ModelSerializer):
         request = self.context.get('request')
         base_price = float(obj.price)
         pv = float(obj.point_value or 0)
+        final_price = base_price
 
         if request and request.user.is_authenticated:
-            # ✅ ১. ইউজার যদি অ্যাডমিন (staff) হয়, তবে রিয়েল প্রাইস দেখাবে
             if request.user.is_staff:
-                return base_price
+                final_price = base_price
+            else:
+                u_status = getattr(request.user, 'status', '').lower()
+                if not u_status and hasattr(request.user, 'profile'):
+                    u_status = getattr(request.user.profile, 'status', '').lower()
 
-            # ২. ইউজার যদি একটিভ মেম্বার হয়, তবে অফার প্রাইস দেখাবে
-            u_status = getattr(request.user, 'status', '').lower()
-            if not u_status and hasattr(request.user, 'profile'):
-                u_status = getattr(request.user.profile, 'status', '').lower()
-
-            if u_status == 'active':
-                return base_price - (pv * 2)
+                if u_status == 'active':
+                    final_price = base_price - (pv * 2)
         
-        return base_price
+        # ✅ float কে string এ রূপান্তর (২ দশমিক ঘর সহ)
+        return "{:.2f}".format(final_price)
 
     def get_point_value(self, obj):
         request = self.context.get('request')
+        # অরিজিনাল পয়েন্ট ভ্যালু
+        current_pv = obj.point_value or 0
         
         if request and request.user.is_authenticated:
-            # ✅ ১. ইউজার যদি অ্যাডমিন (staff) হয়, তবে রিয়েল পয়েন্ট দেখাবে
-            if request.user.is_staff:
-                return obj.point_value
+            if not request.user.is_staff:
+                u_status = getattr(request.user, 'status', '').lower()
+                if not u_status and hasattr(request.user, 'profile'):
+                    u_status = getattr(request.user.profile, 'status', '').lower()
 
-            # ২. ইউজার যদি একটিভ মেম্বার হয়, তবে পয়েন্ট ০ দেখাবে
-            u_status = getattr(request.user, 'status', '').lower()
-            if not u_status and hasattr(request.user, 'profile'):
-                u_status = getattr(request.user.profile, 'status', '').lower()
-
-            if u_status == 'active':
-                return 0
+                if u_status == 'active':
+                    return "0" # স্ট্রিং হিসেবে ০
         
-        return obj.point_value
+        # ✅ পয়েন্ট ভ্যালুকেও string এ রূপান্তর
+        return str(current_pv)
 
     def validate(self, data):
         """
