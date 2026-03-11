@@ -31,7 +31,7 @@ class OrderSerializer(serializers.ModelSerializer):
     class Meta:
         model = Order
         fields = [
-            'id', 'order_number', 'user', 'name', 'phone', 'address', 'city', 'courier',
+            'id', 'order_number', 'user', 'name', 'phone', 'address', 'city', 'courier', # নিশ্চিত করুন মডেলে 'courier' বানান এটাই
             'subtotal', 'shipping_cost', 'total_amount', 
             'payment_method', 'sender_number', 'transaction_id', 
             'status', 'points_awarded', 'created_at', 'items'
@@ -39,10 +39,21 @@ class OrderSerializer(serializers.ModelSerializer):
         read_only_fields = ['order_number', 'points_awarded', 'created_at']
 
     def create(self, validated_data):
-        items_data = self.context.get('request').data.get('items', [])
+        request = self.context.get('request')
+        items_data = request.data.get('items', [])
+        user = request.user
         
+        # ইউজার স্ট্যাটাস চেক (অফার লজিকের জন্য)
+        is_active = False
+        if user.is_authenticated:
+            u_status = getattr(user, 'status', '').lower()
+            if not u_status and hasattr(user, 'profile'):
+                u_status = getattr(user.profile, 'status', '').lower()
+            is_active = (u_status == 'active')
+
         with transaction.atomic():
             order = Order.objects.create(**validated_data)
+            total_points = 0
             
             for item in items_data:
                 try:
@@ -51,22 +62,31 @@ class OrderSerializer(serializers.ModelSerializer):
                     raise serializers.ValidationError(f"Product ID {item['product_id']} not found.")
 
                 qty = int(item['quantity'])
-                
                 if product.stock < qty:
-                    raise serializers.ValidationError(
-                        f"Insufficient stock for {product.name}. Available: {product.stock}"
-                    )
-                
+                    raise serializers.ValidationError(f"Insufficient stock for {product.name}.")
+
+                # স্টক কমানো
                 product.stock -= qty
                 product.save()
+
+                # ✅ অফার লজিক প্রয়োগ: 
+                # ইউজার একটিভ হলে পয়েন্ট ০, নতুবা মডেলে যা আছে তাই।
+                current_pv = 0 if is_active else product.point_value
                 
+                # ইন-একটিভ ইউজারের জন্য পয়েন্ট যোগ করা (অর্ডারের মোট পয়েন্টের জন্য)
+                total_points += (current_pv * qty)
+
                 OrderItem.objects.create(
                     order=order,
-                    product_id=item['product_id'],
-                    product_name=item['product_name'],
+                    product_id=product.id,
+                    product_name=product.name,
                     quantity=qty,
-                    price=item['price'],
-                    point_value=item.get('point_value', 0)
+                    price=item['price'], # ফ্রন্টএন্ড থেকে আসা ক্যালকুলেটেড প্রাইস
+                    point_value=current_pv
                 )
+            
+            # অর্ডারে মোট কত পয়েন্ট পেল তা সেভ করা
+            order.points_awarded = total_points
+            order.save()
             
             return order
