@@ -27,49 +27,45 @@ class CategorySerializer(serializers.ModelSerializer):
 
 class ProductSerializer(serializers.ModelSerializer):
     category_name = serializers.ReadOnlyField(source='category.name')
-    # ডাইনামিক ফিল্ডগুলো
-    display_price = serializers.SerializerMethodField()
-    display_pv = serializers.SerializerMethodField()
+    # নাম আগের মতোই রাখলাম, শুধু এগুলোকে মেথড ফিল্ড বানালাম
+    price = serializers.SerializerMethodField()
+    point_value = serializers.SerializerMethodField()
     
     class Meta:
         model = Product
         fields = [
             'id', 'name', 'description', 'category_name', 'price', 
-            'display_price', 'display_pv', 'stock', 'image', 
-            'barcode_number', 'is_active', 'created_at'
+            'point_value', 'stock', 'image', 'barcode_number', 
+            'is_active', 'created_at'
         ]
 
     def get_user_status(self, request):
         if request and request.user.is_authenticated:
             user = request.user
-            # অ্যাডমিন হলে ডিসকাউন্ট নেই (আপনি চাইলে চেঞ্জ করতে পারেন)
             if user.is_staff: return "inactive" 
-            
-            if hasattr(user, 'status'):
-                return str(user.status).lower().strip()
-            elif hasattr(user, 'profile'):
-                return str(getattr(user.profile, 'status', '')).lower().strip()
+            u_status = getattr(user, 'status', '').lower()
+            if not u_status and hasattr(user, 'profile'):
+                u_status = getattr(user.profile, 'status', '').lower()
+            return u_status.strip()
         return "inactive"
 
-    def get_display_price(self, obj):
+    def get_price(self, obj):
         request = self.context.get('request')
         status = self.get_user_status(request)
         base_price = float(obj.price)
         
         if status == 'active':
             pv = float(obj.point_value or 0)
-            return max(0, base_price - (pv * 2)) # ১ পয়েন্ট = ২ টাকা ছাড়
+            return max(0, base_price - (pv * 2)) # ২ টাকা ডিসকাউন্ট
         return base_price
 
-    def get_display_pv(self, obj):
+    def get_point_value(self, obj):
         request = self.context.get('request')
         status = self.get_user_status(request)
         
-        # একটিভ ইউজার হলে সে ডিসকাউন্ট পায়, তাই PV ০
         if status == 'active':
-            return 0
+            return 0 # একটিভ হলে পয়েন্ট ০
         return obj.point_value
-
 
 
 class CartSerializer(serializers.ModelSerializer):
