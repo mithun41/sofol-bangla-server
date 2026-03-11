@@ -28,7 +28,7 @@ class Order(models.Model):
 
     order_number = models.CharField(max_length=30, unique=True, editable=False)
     user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True)
-    
+    courier = models.CharField(max_length=100, default="Sundarban Courier")
     # Billing Info
     name = models.CharField(max_length=200)
     phone = models.CharField(max_length=15)

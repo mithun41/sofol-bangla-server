@@ -26,15 +26,10 @@ class OrderCreateView(APIView):
         if not items_data:
             return Response({"error": "আপনার কার্টটি খালি!"}, status=status.HTTP_400_BAD_REQUEST)
 
-        # --- ১. ইউজার অ্যাক্টিভ কিনা চেক (তোর কাস্টম ইউজার মডেল অনুযায়ী) ---
-        # তোর মডেলে status সরাসরি User এ আছে, profile এ নয়।
+        # --- ১. ইউজার অ্যাক্টিভ কিনা চেক ---
         raw_status = getattr(user, 'status', 'inactive')
         clean_status = str(raw_status).lower().strip()
         is_active_user = (clean_status == 'active')
-
-        # ডিবাগ প্রিন্ট
-        print(f"--- DEBUG ORDER START ---")
-        print(f"User: {user.username} | DB Status: '{raw_status}' | Logic Active: {is_active_user}")
 
         try:
             with transaction.atomic():
@@ -50,11 +45,10 @@ class OrderCreateView(APIView):
                     unit_pv = float(product.point_value or 0)
                     
                     if is_active_user:
-                       discount = unit_pv * 2
-                       final_unit_price = base_price - discount
-                       final_unit_pv = 0 
+                        discount = unit_pv * 2
+                        final_unit_price = base_price - discount
+                        final_unit_pv = 0 
                     else:
-                        # সাধারণ প্রাইস: ৩০০ টাকা (ফুল) এবং পয়েন্ট পাবে ৫০
                         final_unit_price = base_price
                         final_unit_pv = unit_pv 
 
@@ -68,18 +62,22 @@ class OrderCreateView(APIView):
                         'pv': final_unit_pv
                     })
 
-                # শিপিং কস্ট
+                # শিপিং কস্ট ও কুরিয়ার
                 city = data.get('city', 'Dhaka').strip()
+                # নতুন: কুরিয়ার সার্ভিস ডাটা রিসিভ করা (ডিফল্ট সুন্দরবন দেওয়া আছে)
+                courier_service = data.get('courier', 'Sundarban Courier').strip()
+                
                 shipping_cost = 100 if city == 'Dhaka' else 150
                 total_amount = calculated_subtotal + shipping_cost
 
-                # ২. মেইন অর্ডার সেভ
+                # ২. মেইন অর্ডার সেভ (courier ফিল্ড সহ)
                 order = Order.objects.create(
                     user=user,
                     name=data.get('name'),
                     phone=data.get('phone'),
                     address=data.get('address'),
                     city=city,
+                    courier=courier_service, # <-- কুরিয়ার এখানে সেভ হবে
                     subtotal=calculated_subtotal,
                     shipping_cost=shipping_cost,
                     total_amount=total_amount,
@@ -101,9 +99,6 @@ class OrderCreateView(APIView):
                         point_value=p_item['pv']
                     )
 
-                print(f"Final Amount: {total_amount} | Total PV: {total_pv}")
-                print(f"--- DEBUG ORDER END ---")
-
                 return Response({
                     "success": True,
                     "message": "অর্ডারটি সফলভাবে গ্রহণ করা হয়েছে!",
@@ -116,6 +111,7 @@ class OrderCreateView(APIView):
             return Response({"error": "প্রোডাক্ট খুঁজে পাওয়া যায়নি!"}, status=status.HTTP_404_NOT_FOUND)
         except Exception as e:
             return Response({"error": f"সিস্টেম এরর: {str(e)}"}, status=status.HTTP_400_BAD_REQUEST)
+
 
 # --- বাকি অ্যাডমিন ও ইউজার ভিউগুলো একই থাকবে ---
 class AdminOrderListView(generics.ListAPIView):
