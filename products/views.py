@@ -89,11 +89,10 @@ class CartSyncView(APIView):
         
         is_active = False
         if request.user.is_authenticated:
-            u_status = ""
-            if hasattr(request.user, 'profile'):
+            # ইউজার স্ট্যাটাস চেক
+            u_status = getattr(request.user, 'status', '').lower()
+            if not u_status and hasattr(request.user, 'profile'):
                 u_status = getattr(request.user.profile, 'status', '').lower()
-            elif hasattr(request.user, 'status'):
-                u_status = getattr(request.user, 'status', '').lower()
             
             is_active = (u_status == 'active')
 
@@ -103,19 +102,20 @@ class CartSyncView(APIView):
             base_price = float(p.price)
             pv = float(p.point_value or 0)
             
-            # ✅ ডিসকাউন্ট লজিক আপডেট: ১ পয়েন্ট = ২ টাকা অফার
             if is_active:
                 discount = pv * 2
                 final_price = base_price - discount
+                final_pv = 0  # ✅ একটিভ মেম্বারদের জন্য PV জিরো
             else:
                 final_price = base_price
+                final_pv = pv # ✅ ইনঅ্যাক্টিভ মেম্বারদের জন্য ফুল PV
 
             data.append({
                 "id": p.id,
                 "name": p.name,
                 "product_price": final_price,
                 "image": image_url,
-                "product_pv": pv,
+                "product_pv": final_pv, # আপডেট করা ভ্যালু
                 "stock_status": "in_stock" if (hasattr(p, 'stock') and p.stock > 0) else "available"
             })
             
