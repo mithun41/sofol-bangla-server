@@ -154,9 +154,7 @@ class UserProfileView(APIView):
         user.save()
         return Response({"message": "Profile updated successfully!"})
     
-from rest_framework.views import APIView
-from rest_framework.parsers import JSONParser, MultiPartParser, FormParser
-from rest_framework.permissions import IsAuthenticated
+
 
 class ProfileUpdateView(APIView):
     permission_classes = [IsAuthenticated]
@@ -492,13 +490,6 @@ class ChangePasswordView(APIView):
 
 
 
-from rest_framework.views import APIView
-from rest_framework.response import Response
-from rest_framework import status
-from rest_framework.permissions import AllowAny
-# Import your serializers here
-# from .serializers import ForgotPasswordSerializer, ResetPasswordSerializer
-
 class ForgotPasswordView(APIView):
     """
     Step 1: Request OTP for password reset
@@ -511,12 +502,12 @@ class ForgotPasswordView(APIView):
         if serializer.is_valid():
             otp = serializer.generate_otp()
             # Debugging in console
-            print(f"\n 🔥🔥🔥 [DEBUG OTP] Phone: {request.data.get('phone')} | OTP: {otp} \n")
+           
             
             return Response({
                 "status": "success",
                 "message": "OTP has been sent to your phone number.",
-                "otp_debug": otp # Only for development phase
+               
             }, status=status.HTTP_200_OK)
 
         # Better error handling: extract first error message

@@ -184,5 +184,5 @@ class CartViewSet(viewsets.ModelViewSet):
             }, status=status.HTTP_200_OK)
         
         return Response({
-            "message": "Cart is  empty."
+            "message": "Your cart is empty"
         }, status=status.HTTP_200_OK)
