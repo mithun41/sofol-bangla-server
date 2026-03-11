@@ -57,7 +57,7 @@ class ProductSerializer(serializers.ModelSerializer):
 
     def get_point_value(self, obj):
         request = self.context.get('request')
-        # অরিজিনাল পয়েন্ট ভ্যালু
+        # মডেলে এখন IntegerField, তাই দশমিকের ভয় নেই
         current_pv = obj.point_value or 0
         
         if request and request.user.is_authenticated:
@@ -67,10 +67,10 @@ class ProductSerializer(serializers.ModelSerializer):
                     u_status = getattr(request.user.profile, 'status', '').lower()
 
                 if u_status == 'active':
-                    return "0" # স্ট্রিং হিসেবে ০
+                    return "0" # একটিভ ইউজারের জন্য স্ট্রিং হিসেবে ০
         
-        # ✅ পয়েন্ট ভ্যালুকেও string এ রূপান্তর
-        return str(current_pv)
+        # রিটার্ন করবে স্ট্রিং হিসেবে কিন্তু পূর্ণসংখ্যা (যেমন: "10")
+        return str(int(current_pv))
 
     def validate(self, data):
         """
