@@ -167,3 +167,11 @@ class CartSerializer(serializers.ModelSerializer):
         if product and product.image:
             return request.build_absolute_uri(product.image.url) if request else product.image.url
         return None
+
+
+class BannerSerializer(serializers.ModelSerializer):
+    # ইমেজ ফিল্ডকে সাধারণভাবেই রাখ যেন রিড/রাইট দুইটাই হয়
+    # জ্যাঙ্গো নিজেই ফুল ইউআরএল হ্যান্ডেল করবে
+    class Meta:
+        model = Banner
+        fields = ['id', 'title', 'image', 'link', 'is_active', 'created_at']
