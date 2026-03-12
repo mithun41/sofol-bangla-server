@@ -2,10 +2,12 @@ from rest_framework import viewsets, permissions, status
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework.decorators import action
-from .models import Product, Category
-from .serializers import CartSerializer, ProductSerializer, CategorySerializer
+from .models import Banner, Product, Category
+from .serializers import BannerSerializer, CartSerializer, ProductSerializer, CategorySerializer
 from .models import Product, Category, Cart
 from django.db.models import Q 
+from rest_framework.permissions import IsAuthenticatedOrReadOnly
+from rest_framework.parsers import MultiPartParser, FormParser
 
 class CategoryViewSet(viewsets.ModelViewSet):
     queryset = Category.objects.all()
@@ -179,3 +181,10 @@ class CartViewSet(viewsets.ModelViewSet):
         return Response({
             "message": "Your cart is empty"
         }, status=status.HTTP_200_OK)
+        
+
+class BannerViewSet(viewsets.ModelViewSet):
+    queryset = Banner.objects.all().order_by('-created_at') # অ্যাডমিনে সব দেখাবে
+    serializer_class = BannerSerializer
+    permission_classes = [IsAuthenticatedOrReadOnly]
+    parser_classes = (MultiPartParser, FormParser)

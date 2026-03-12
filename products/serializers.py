@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from .models import Category, Product, Cart
+from .models import Banner, Category, Product, Cart
 
 class CategorySerializer(serializers.ModelSerializer):
     # ইমেজ ফিল্ডটি আগের মতোই থাকল
@@ -143,3 +143,12 @@ class CartSerializer(serializers.ModelSerializer):
         if obj.product.image:
             return request.build_absolute_uri(obj.product.image.url) if request else obj.product.image.url
         return None
+
+
+
+class BannerSerializer(serializers.ModelSerializer):
+    # ইমেজ ফিল্ডকে সাধারণভাবেই রাখ যেন রিড/রাইট দুইটাই হয়
+    # জ্যাঙ্গো নিজেই ফুল ইউআরএল হ্যান্ডেল করবে
+    class Meta:
+        model = Banner
+        fields = ['id', 'title', 'image', 'link', 'is_active', 'created_at']
