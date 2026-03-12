@@ -14,11 +14,12 @@ from .views import (
     UserUpdateView,     
     ActivateUserView,  
     BinaryTreeView,
+    VerifyOTPView,
     WithdrawalListCreateView,
     admin_approve_withdraw,
     admin_withdrawal_list,
-    LogoutView,          # নতুন যোগ করা হয়েছে
-    ChangePasswordView   # নতুন যোগ করা হয়েছে
+    LogoutView,          
+    ChangePasswordView   
 )
 
 urlpatterns = [
@@ -29,6 +30,7 @@ urlpatterns = [
     path('token/refresh/', TokenRefreshView.as_view(), name='token_refresh'),
     path('change-password/', ChangePasswordView.as_view(), name='change-password'),
     path('forgot-password/', ForgotPasswordView.as_view(), name='forgot-password'),
+    path('verify-otp/', VerifyOTPView.as_view(), name='verify-otp'),
     path('reset-password/', ResetPasswordView.as_view(), name='reset-password'),
     
     # --- User Profile & Networking ---

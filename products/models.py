@@ -126,3 +126,15 @@ class Cart(models.Model):
 
     def __str__(self):
         return f"{self.user.username} - {self.product.name} ({self.quantity})"
+    
+
+
+class Banner(models.Model):
+    title = models.CharField(max_length=150, blank=True, null=True)
+    image = models.ImageField(upload_to='banners/')
+    link = models.URLField(blank=True, null=True, help_text="ব্যানারে ক্লিক করলে কোথায় যাবে (ঐচ্ছিক)")
+    is_active = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return self.title if self.title else f"Banner {self.id}"

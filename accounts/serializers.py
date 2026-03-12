@@ -332,3 +332,35 @@ class ResetPasswordSerializer(serializers.Serializer):
         user.otp_expiry = None
         user.save()
         return user
+    
+class VerifyOTPSerializer(serializers.Serializer):
+    username = serializers.CharField(required=True)
+    phone = serializers.CharField(required=True)
+    otp = serializers.CharField(required=True)
+
+    def validate(self, data):
+        user = User.objects.filter(
+            username=data['username'], 
+            phone=data['phone'], 
+            otp=data['otp']
+        ).first()
+
+        if not user:
+            raise serializers.ValidationError("Invalid credentials or OTP.")
+        
+        if user.otp_expiry and user.otp_expiry < timezone.now():
+            raise serializers.ValidationError("OTP has expired.")
+            
+        return data
+
+class ResetPasswordFinalSerializer(serializers.Serializer):
+    username = serializers.CharField(required=True)
+    new_password = serializers.CharField(required=True, min_length=6)
+
+    def save(self):
+        user = User.objects.get(username=self.validated_data['username'])
+        user.set_password(self.validated_data['new_password'])
+        user.otp = None 
+        user.otp_expiry = None
+        user.save()
+        return user
