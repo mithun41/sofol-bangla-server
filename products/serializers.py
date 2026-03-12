@@ -107,7 +107,16 @@ class CartSerializer(serializers.ModelSerializer):
 
     def get_product_price(self, obj):
         request = self.context.get('request')
-        product = obj.product
+        
+        # মামা, এখানে ডিকশনারি এবং অবজেক্ট দুইটাই হ্যান্ডেল করা হয়েছে
+        if isinstance(obj, dict):
+            product = obj.get('product')
+        else:
+            product = getattr(obj, 'product', None)
+
+        if not product:
+            return 0
+
         base_price = float(product.price)
         pv = float(product.point_value or 0)
 
@@ -118,11 +127,20 @@ class CartSerializer(serializers.ModelSerializer):
                 u_status = getattr(user.profile, 'status', '').lower()
 
             if u_status == 'active':
-                return base_price - (pv * 2) # ডাবল অফার মাইনাস
+                return base_price - (pv * 2) 
         return base_price
 
     def get_product_pv(self, obj):
         request = self.context.get('request')
+        
+        if isinstance(obj, dict):
+            product = obj.get('product')
+        else:
+            product = getattr(obj, 'product', None)
+
+        if not product:
+            return 0
+
         if request and request.user.is_authenticated:
             user = request.user
             u_status = getattr(user, 'status', '').lower()
@@ -130,25 +148,22 @@ class CartSerializer(serializers.ModelSerializer):
                 u_status = getattr(user.profile, 'status', '').lower()
 
             if u_status == 'active':
-                return 0 # অ্যাক্টিভ ইউজার পয়েন্ট পাবে না
-        return obj.product.point_value
+                return 0 
+        return product.point_value
 
     def get_item_subtotal(self, obj):
-        # ক্যালকুলেটেড প্রাইস অনুযায়ী সাবটোটাল
         price = self.get_product_price(obj)
-        return price * obj.quantity
+        quantity = obj.get('quantity') if isinstance(obj, dict) else getattr(obj, 'quantity', 0)
+        return price * quantity
 
     def get_product_image(self, obj):
         request = self.context.get('request')
-        if obj.product.image:
-            return request.build_absolute_uri(obj.product.image.url) if request else obj.product.image.url
+        
+        if isinstance(obj, dict):
+            product = obj.get('product')
+        else:
+            product = getattr(obj, 'product', None)
+
+        if product and product.image:
+            return request.build_absolute_uri(product.image.url) if request else product.image.url
         return None
-
-
-
-class BannerSerializer(serializers.ModelSerializer):
-    # ইমেজ ফিল্ডকে সাধারণভাবেই রাখ যেন রিড/রাইট দুইটাই হয়
-    # জ্যাঙ্গো নিজেই ফুল ইউআরএল হ্যান্ডেল করবে
-    class Meta:
-        model = Banner
-        fields = ['id', 'title', 'image', 'link', 'is_active', 'created_at']
