@@ -31,12 +31,12 @@ class OrderSerializer(serializers.ModelSerializer):
     class Meta:
         model = Order
         fields = [
-            'id', 'order_number', 'user', 'name', 'phone', 'address', 'city', 'courier', # নিশ্চিত করুন মডেলে 'courier' বানান এটাই
-            'subtotal', 'shipping_cost', 'total_amount', 
+            'id', 'order_number', 'user', 'name', 'phone', 'address', 'city', 'courier',
+            'subtotal', 'total_amount', 'total_pv',
             'payment_method', 'sender_number', 'transaction_id', 
-            'status', 'points_awarded', 'created_at', 'items'
+            'status', 'created_at', 'items'
         ]
-        read_only_fields = ['order_number', 'points_awarded', 'created_at']
+        read_only_fields = ['order_number', 'total_pv', 'created_at', 'total_amount']
 
     def create(self, validated_data):
         request = self.context.get('request')

@@ -26,10 +26,12 @@ class OrderCreateView(APIView):
         if not items_data:
             return Response({"error": "আপনার কার্টটি খালি!"}, status=status.HTTP_400_BAD_REQUEST)
 
-        # --- ১. ইউজার অ্যাক্টিভ কিনা চেক ---
+        # ১. ইউজার স্ট্যাটাস চেক
         raw_status = getattr(user, 'status', 'inactive')
-        clean_status = str(raw_status).lower().strip()
-        is_active_user = (clean_status == 'active')
+        if not raw_status and hasattr(user, 'profile'):
+            raw_status = getattr(user.profile, 'status', 'inactive')
+        
+        is_active_user = (str(raw_status).lower().strip() == 'active')
 
         try:
             with transaction.atomic():
@@ -41,9 +43,13 @@ class OrderCreateView(APIView):
                     product = Product.objects.select_for_update().get(id=item['product_id'])
                     qty = int(item['quantity'])
                     
+                    if product.stock < qty:
+                        raise Exception(f"{product.name} এর পর্যাপ্ত স্টক নেই!")
+
                     base_price = float(product.price)
                     unit_pv = float(product.point_value or 0)
                     
+                    # অফার লজিক
                     if is_active_user:
                         discount = unit_pv * 2
                         final_unit_price = base_price - discount
@@ -55,6 +61,10 @@ class OrderCreateView(APIView):
                     calculated_subtotal += (final_unit_price * qty)
                     total_pv += (final_unit_pv * qty)
 
+                    # স্টক আপডেট
+                    product.stock -= qty
+                    product.save()
+
                     processed_items.append({
                         'product': product,
                         'quantity': qty,
@@ -62,25 +72,19 @@ class OrderCreateView(APIView):
                         'pv': final_unit_pv
                     })
 
-                # শিপিং কস্ট ও কুরিয়ার
-                city = data.get('city', 'Dhaka').strip()
-                # নতুন: কুরিয়ার সার্ভিস ডাটা রিসিভ করা (ডিফল্ট সুন্দরবন দেওয়া আছে)
-                courier_service = data.get('courier', 'Sundarban Courier').strip()
-                
-                shipping_cost = 100 if city == 'Dhaka' else 150
-                total_amount = calculated_subtotal + shipping_cost
+                # শিপিং কস্ট বাদ দেওয়া হয়েছে
+                total_amount = calculated_subtotal 
 
-                # ২. মেইন অর্ডার সেভ (courier ফিল্ড সহ)
+                # ২. মেইন অর্ডার সেভ
                 order = Order.objects.create(
                     user=user,
                     name=data.get('name'),
                     phone=data.get('phone'),
                     address=data.get('address'),
-                    city=city,
-                    courier=courier_service, # <-- কুরিয়ার এখানে সেভ হবে
+                    city=data.get('city', ''),
+                    courier=data.get('courier', 'Sundarban'),
                     subtotal=calculated_subtotal,
-                    shipping_cost=shipping_cost,
-                    total_amount=total_amount,
+                    total_amount=total_amount, # সাবটোটাল আর টোটাল এখন সমান
                     total_pv=total_pv,
                     payment_method=data.get('payment_method', 'cod'),
                     transaction_id=data.get('transaction_id', ''),
@@ -101,17 +105,13 @@ class OrderCreateView(APIView):
 
                 return Response({
                     "success": True,
-                    "message": "অর্ডারটি সফলভাবে গ্রহণ করা হয়েছে!",
+                    "message": "অর্ডারটি সফলভাবে সম্পন্ন হয়েছে!",
                     "order_id": order.id,
-                    "is_active_member": is_active_user,
                     "payable_amount": total_amount
                 }, status=status.HTTP_201_CREATED)
     
-        except Product.DoesNotExist:
-            return Response({"error": "প্রোডাক্ট খুঁজে পাওয়া যায়নি!"}, status=status.HTTP_404_NOT_FOUND)
         except Exception as e:
-            return Response({"error": f"সিস্টেম এরর: {str(e)}"}, status=status.HTTP_400_BAD_REQUEST)
-
+            return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
 
 # --- বাকি অ্যাডমিন ও ইউজার ভিউগুলো একই থাকবে ---
 class AdminOrderListView(generics.ListAPIView):
