@@ -1,5 +1,5 @@
 from django.urls import path
-from .views import AdminDashboardReportView, OrderCreateView, AdminOrderListView, AdminOrderUpdateView, UserDashboardReportView, UserOrderListView
+from .views import AdminDashboardReportView, AdminOrderAnalyticsView, OrderCreateView, AdminOrderListView, AdminOrderUpdateView, OrderSalesAnalyticsView, UserDashboardReportView, UserOrderListView
 
 urlpatterns = [
     path('place-order/', OrderCreateView.as_view(), name='place_order'),
@@ -9,4 +9,6 @@ urlpatterns = [
     path('my-orders/', UserOrderListView.as_view(), name='user-order-list'),
     path('admin/report-summary/', AdminDashboardReportView.as_view(), name='admin-report'),
     path('user/report-summary/', UserDashboardReportView.as_view(), name='user-report'),
+    path('admin/income-analytics/', AdminOrderAnalyticsView.as_view(), name='admin-income-analytics'),
+    path('admin/sales-report/', OrderSalesAnalyticsView.as_view(), name='admin-sales-report'),
 ]

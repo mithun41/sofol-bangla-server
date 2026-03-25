@@ -28,63 +28,57 @@ class CategorySerializer(serializers.ModelSerializer):
 class ProductSerializer(serializers.ModelSerializer):
     category_name = serializers.ReadOnlyField(source='category.name')
     
+    # আমরা অরিজিনাল প্রাইস এবং ডিসকাউন্ট প্রাইস দুইটাই রাখবো
+    # যাতে ফ্রন্টএন্ডে '৳৫০০  ৳৪৫০' এভাবে দেখানো যায়
+    original_price = serializers.ReadOnlyField(source='price')
+    discount_price = serializers.SerializerMethodField()
+    # আমরা মেইন 'price' ফিল্ডটাকেও মেথড দিয়ে কন্ট্রোল করবো
     price = serializers.SerializerMethodField()
-    point_value = serializers.SerializerMethodField()
 
     class Meta:
         model = Product
-        fields = '__all__'
+        fields = '__all__' # এখানে সব ফিল্ড থাকবে, সাথে উপরে ডিক্লেয়ার করাগুলোও আসবে
 
-    def get_price(self, obj):
+    def get_discount_price(self, obj):
+        """ইউজার একটিভ থাকলে ডিসকাউন্ট করা প্রাইসটা কত হবে সেটা ক্যালকুলেট করা"""
         request = self.context.get('request')
         base_price = float(obj.price)
         pv = float(obj.point_value or 0)
-        final_price = base_price
 
         if request and request.user.is_authenticated:
-            if request.user.is_staff:
-                final_price = base_price
-            else:
-                u_status = getattr(request.user, 'status', '').lower()
-                if not u_status and hasattr(request.user, 'profile'):
-                    u_status = getattr(request.user.profile, 'status', '').lower()
-
-                if u_status == 'active':
-                    final_price = base_price - (pv * 2)
-        
-        # ✅ float কে string এ রূপান্তর (২ দশমিক ঘর সহ)
-        return "{:.2f}".format(final_price)
-
-    def get_point_value(self, obj):
-        request = self.context.get('request')
-        # মডেলে IntegerField থাকায় সরাসরি ভ্যালু নিচ্ছি
-        current_pv = obj.point_value or 0
-        
-        if request and request.user.is_authenticated:
-            # অ্যাডমিন হলে অরিজিনাল পয়েন্ট নাম্বার হিসেবে যাবে
-            if request.user.is_staff:
-                return int(current_pv)
-
-            # মেম্বার চেক
+            # ইউজার একটিভ কি না চেক (তোর লজিক অনুযায়ী)
             u_status = getattr(request.user, 'status', '').lower()
             if not u_status and hasattr(request.user, 'profile'):
                 u_status = getattr(request.user.profile, 'status', '').lower()
 
-            # একটিভ মেম্বার হলে ০ (নাম্বার হিসেবে)
-            if u_status == 'active':
-                return 0 
+            if u_status == 'active' and not request.user.is_staff:
+                return round(base_price - (pv * 2), 2)
         
-        # ডিফল্টভাবে পূর্ণসংখ্যা (Number) হিসেবে রিটার্ন করবে
-        return int(current_pv)
+        return None # একটিভ না হলে ডিসকাউন্ট প্রাইস দেখানোর দরকার নেই
+
+    def get_price(self, obj):
+        """মেইন প্রাইস ফিল্ড যেটা শপ পেজে শো করবে"""
+        discount = self.get_discount_price(obj)
+        # যদি ডিসকাউন্ট থাকে তবে ডিসকাউন্ট প্রাইস দেখাবে, নাহলে অরিজিনাল
+        return discount if discount is not None else float(obj.price)
+
+    def validate(self, data):
+        # তোর আগের ভ্যালিডেশন লজিক ঠিক আছে
+        request = self.context.get('request')
+        if request and request.method in ['POST', 'PUT', 'PATCH']:
+            if 'price' in request.data:
+                data['price'] = request.data['price']
+            if 'point_value' in request.data:
+                data['point_value'] = request.data['point_value']
+        return data
 
     def validate(self, data):
         """
-        এই মেথডটি নিশ্চিত করে যে অ্যাডমিন থেকে ডাটা আপডেট করার সময় 
-        অরিজিনাল ভ্যালুগুলোই সেভ হচ্ছে।
+        অ্যাডমিন প্যানেল থেকে ডাটা আপডেট করার সময় যাতে ভুল করে 
+        ডিসকাউন্ট প্রাইস সেভ না হয়ে যায়, তার জন্য অরিজিনাল ইনপুট নেওয়া।
         """
         request = self.context.get('request')
         if request and request.method in ['POST', 'PUT', 'PATCH']:
-            # ইনপুট ডাটা থেকে অরিজিনাল ভ্যালু সেট করা
             if 'price' in request.data:
                 data['price'] = request.data['price']
             if 'point_value' in request.data:
@@ -105,69 +99,57 @@ class CartSerializer(serializers.ModelSerializer):
             'product_image', 'product_pv', 'quantity', 'item_subtotal'
         ]
 
+    def get_user_status(self, request):
+        """ইউজার একটিভ কি না তা চেক করার কমন ফাংশন"""
+        if not request or not request.user.is_authenticated:
+            return None
+        
+        user = request.user
+        # ইউজার মডেল বা প্রোফাইল মডেল চেক করা
+        u_status = getattr(user, 'status', '').lower()
+        if not u_status and hasattr(user, 'profile'):
+            u_status = getattr(user.profile, 'status', '').lower()
+        return u_status
+
     def get_product_price(self, obj):
         request = self.context.get('request')
+        product = obj.product if hasattr(obj, 'product') else obj.get('product')
         
-        # মামা, এখানে ডিকশনারি এবং অবজেক্ট দুইটাই হ্যান্ডেল করা হয়েছে
-        if isinstance(obj, dict):
-            product = obj.get('product')
-        else:
-            product = getattr(obj, 'product', None)
-
-        if not product:
-            return 0
+        if not product: return 0
 
         base_price = float(product.price)
         pv = float(product.point_value or 0)
-
-        if request and request.user.is_authenticated:
-            user = request.user
-            u_status = getattr(user, 'status', '').lower()
-            if not u_status and hasattr(user, 'profile'):
-                u_status = getattr(user.profile, 'status', '').lower()
-
-            if u_status == 'active':
-                return base_price - (pv * 2) 
+        
+        # একটিভ মেম্বার হলে ডিসকাউন্ট (Price - PV*2)
+        if self.get_user_status(request) == 'active':
+            return base_price - (pv * 2) 
         return base_price
 
     def get_product_pv(self, obj):
         request = self.context.get('request')
+        product = obj.product if hasattr(obj, 'product') else obj.get('product')
         
-        if isinstance(obj, dict):
-            product = obj.get('product')
-        else:
-            product = getattr(obj, 'product', None)
+        if not product: return 0
 
-        if not product:
-            return 0
-
-        if request and request.user.is_authenticated:
-            user = request.user
-            u_status = getattr(user, 'status', '').lower()
-            if not u_status and hasattr(user, 'profile'):
-                u_status = getattr(user.profile, 'status', '').lower()
-
-            if u_status == 'active':
-                return 0 
-        return product.point_value
+        # মামা, এখানে খেয়াল কর: একটিভ ইউজার কি আসলেই ০ পিভি পাবে? 
+        # যদি তাই হয় তবে এই লজিক ঠিক আছে।
+        if self.get_user_status(request) == 'active':
+            return 0 
+        return float(product.point_value or 0)
 
     def get_item_subtotal(self, obj):
+        # প্রাইস ইনটু কোয়ান্টিটি
         price = self.get_product_price(obj)
-        quantity = obj.get('quantity') if isinstance(obj, dict) else getattr(obj, 'quantity', 0)
-        return price * quantity
+        quantity = obj.quantity if hasattr(obj, 'quantity') else obj.get('quantity', 0)
+        return round(price * quantity, 2) # ২ দশমিক ঘর পর্যন্ত রাউন্ড করে দিলাম
 
     def get_product_image(self, obj):
         request = self.context.get('request')
+        product = obj.product if hasattr(obj, 'product') else obj.get('product')
         
-        if isinstance(obj, dict):
-            product = obj.get('product')
-        else:
-            product = getattr(obj, 'product', None)
-
         if product and product.image:
             return request.build_absolute_uri(product.image.url) if request else product.image.url
         return None
-
 
 class BannerSerializer(serializers.ModelSerializer):
     # ইমেজ ফিল্ডকে সাধারণভাবেই রাখ যেন রিড/রাইট দুইটাই হয়

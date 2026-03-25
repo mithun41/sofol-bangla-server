@@ -2,14 +2,21 @@ from django.contrib.auth.models import AbstractUser
 from django.db import models
 import uuid
 from django.conf import settings
+from decimal import Decimal
+from django.db import transaction
+
+# --- USER MODEL ---
 
 class User(AbstractUser):
     name = models.CharField(max_length=255, blank=True)
     email = models.EmailField(unique=False, null=True, blank=True)
     phone = models.CharField(max_length=15, unique=False)
     profile_picture = models.ImageField(upload_to='profile_pics/', null=True, blank=True)
-    reff_id = models.CharField(max_length=12, unique=True, blank=True)
-    placement_id = models.CharField(max_length=12, unique=True, blank=True)
+    
+    # ইউজারনেম রেফার আইডি হিসেবে ব্যবহারের জন্য লেন্থ বাড়ানো হলো
+    reff_id = models.CharField(max_length=50, unique=True, blank=True)
+    placement_id = models.CharField(max_length=50, unique=True, blank=True)
+    
     division = models.CharField(max_length=100, blank=True, null=True)
     otp = models.CharField(max_length=6, null=True, blank=True)
     otp_expiry = models.DateTimeField(null=True, blank=True)
@@ -20,9 +27,7 @@ class User(AbstractUser):
     total_left = models.IntegerField(default=0)
     total_right = models.IntegerField(default=0)
     
-    # এটি সবচেয়ে গুরুত্বপূর্ণ: এই ইউজার আগে কয়টি ম্যাচিংয়ের টাকা পেয়েছে তার হিসাব
     paid_matches = models.PositiveIntegerField(default=0) 
-    
     balance = models.DecimalField(max_digits=12, decimal_places=2, default=0.00) 
     points = models.IntegerField(default=0) 
     
@@ -35,30 +40,30 @@ class User(AbstractUser):
     createdAt = models.DateTimeField(auto_now_add=True, null=True, blank=True)
 
     def save(self, *args, **kwargs):
-        # আইডি জেনারেশন (আগের মতো)
+        # ✅ রিকোয়ারমেন্ট অনুযায়ী: ইউজারনেমকেই রেফার এবং প্লেসমেন্ট আইডি করা হলো
         if not self.reff_id:
-            self.reff_id = "REF" + str(uuid.uuid4().hex[:6].upper())
+            self.reff_id = self.username
         if not self.placement_id:
-            self.placement_id = "PLC" + str(uuid.uuid4().hex[:6].upper())
+            self.placement_id = self.username
 
         is_becoming_active = False
         added_points = 0
 
         if self.pk:
+            # ট্রানজেকশন সেফটির জন্য ওল্ড ডাটা গেট করা
             old_user = User.objects.get(pk=self.pk)
             
-            # ১. নতুন পয়েন্ট যোগ হয়েছে কি না চেক (ফান্ডে টাকা পাঠানোর জন্য)
+            # পয়েন্ট যোগ হয়েছে কি না চেক
             if self.points > old_user.points:
                 added_points = self.points - old_user.points
             
-            # ২. অ্যাক্টিভেশন কন্ডিশন চেক
-            # যদি আগে ইনাক্টিভ থাকে এবং এখন ১০০০ পয়েন্ট বা তার বেশি হয়
+            # একটিভেশন লজিক: ১০০০ পয়েন্ট হলে একটিভ এবং পয়েন্ট রিসেট
             if old_user.status == 'inactive' and (self.points >= 1000 or self.status == 'active'):
                 is_becoming_active = True
                 self.status = 'active'
-                self.points = 0  # মামা, তোর রিকোয়ারমেন্ট: একটিভ হলে পয়েন্ট ০ হয়ে যাবে
+                self.points = 0
         else:
-            # নতুন ইউজার তৈরির সময় যদি পয়েন্ট থাকে
+            # নতুন ইউজার তৈরির সময়
             added_points = self.points
             if self.points >= 1000 or self.status == 'active':
                 is_becoming_active = True
@@ -71,15 +76,16 @@ class User(AbstractUser):
         # মেইন সেভ কল
         super().save(*args, **kwargs)
 
-        # ৩. ফান্ড ডিস্ট্রিবিউশন: ইউজার একটিভ হোক বা না হোক, পয়েন্ট বাড়লে টাকা ফান্ডে যাবে
+        # ফান্ড এবং বোনাস ডিস্ট্রিবিউশন (সার্ভিস কল)
         if added_points > 0:
             from accounts.services import distribute_money_to_funds
             distribute_money_to_funds(added_points)
 
-        # ৪. বোনাস ডিস্ট্রিবিউশন: শুধুমাত্র যখন ইনাক্টিভ থেকে একটিভ হবে
         if is_becoming_active:
             from accounts.services import calculate_commission
             calculate_commission(self)
+
+# --- OTHER MODELS ---
 
 class BonusLog(models.Model):
     user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='bonus_logs')
@@ -95,8 +101,6 @@ class WithdrawalRequest(models.Model):
     account_number = models.CharField(max_length=20)
     status = models.CharField(max_length=10, choices=STATUS_CHOICES, default='pending')
     created_at = models.DateTimeField(auto_now_add=True)
-    
-# models.py এ যোগ কর
 
 class GlobalFund(models.Model):
     referral_fund = models.DecimalField(max_digits=15, decimal_places=2, default=0.00)
@@ -114,11 +118,8 @@ class GlobalFund(models.Model):
 
 class FundLog(models.Model):
     TRANSACTION_TYPES = (('inbound', 'Money In'), ('outbound', 'Money Out'))
-    fund_type = models.CharField(max_length=50) # referral, matching, etc.
+    fund_type = models.CharField(max_length=50)
     amount = models.DecimalField(max_digits=12, decimal_places=2)
     transaction_type = models.CharField(max_length=10, choices=TRANSACTION_TYPES)
     reason = models.CharField(max_length=255)
     created_at = models.DateTimeField(auto_now_add=True)
-
-    def __str__(self):
-        return f"{self.transaction_type} - {self.fund_type}: {self.amount}"

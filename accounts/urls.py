@@ -5,6 +5,7 @@ from .views import (
     AdminDashboardStatsView,
     BonusLogListView,
     ForgotPasswordView,
+    MyNetworkView,
     MyTokenObtainPairView,
     ProfileUpdateView,
     RegisterView,
@@ -50,4 +51,5 @@ urlpatterns = [
     path('activate-test/<int:user_id>/', ActivateUserView.as_view(), name='activate-test'),
     path('admin/withdrawals/', admin_withdrawal_list, name='admin-withdrawal-list'),
     path('admin/withdrawals/<int:pk>/handle/', admin_approve_withdraw, name='admin-withdrawal-handle'),
+    path('my-network/', MyNetworkView.as_view(), name='my-network'),
 ]

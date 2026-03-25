@@ -1,6 +1,11 @@
+from datetime import timedelta
+from datetime import datetime
+from django.db.models import Sum, Count, Value, DecimalField # এখানে Value আর DecimalField যোগ কর
+from django.db.models.functions import Coalesce
+
 from django.utils import timezone
 from django.db import transaction
-from django.db.models import Sum, F, DecimalField
+from django.db.models import Count, Sum, F, DecimalField
 from django.db.models.functions import Coalesce
 from rest_framework import generics, permissions, status
 from rest_framework.views import APIView
@@ -200,4 +205,118 @@ class UserDashboardReportView(APIView):
             "monthly_points": int(user_monthly_points),
             "total_orders": total_orders,
             "month_name": now.strftime('%B')
+        })
+        
+class AdminOrderAnalyticsView(APIView):
+    permission_classes = [IsAdminUser]
+
+    def get(self, request):
+        filter_type = request.query_params.get('filter', '7days')
+        start_date_str = request.query_params.get('start_date')
+        end_date_str = request.query_params.get('end_date')
+        today = timezone.now().date()
+
+        # ১. ডেট সেট করা
+        if start_date_str and end_date_str:
+            start_date, end_date = start_date_str, end_date_str
+        elif filter_type == '15days':
+            start_date, end_date = today - timedelta(days=15), today
+        elif filter_type == '1month':
+            start_date, end_date = today - timedelta(days=30), today
+        else:
+            start_date, end_date = today - timedelta(days=7), today
+
+        # ২. কুয়েরি (তোর মডেলের সঠিক ফিল্ড name: created_at এবং total_amount)
+        # তোর মডেলে যদি Order থাকে, তবে নিশ্চিত করিস status টা 'completed' নাকি 'active'
+        from orders.models import Order # তোর অর্ডারের সঠিক পাথ দিবি
+        
+        orders = Order.objects.filter(
+            created_at__date__range=[start_date, end_date],
+            status='completed' 
+        )
+
+        # total_price এর বদলে total_amount হবে তোর এরর অনুযায়ী
+        income_data = orders.aggregate(total=Sum('total_amount'))
+        total_income = income_data['total'] or 0
+        total_orders_count = orders.count()
+
+        # ৩. গ্রাফের জন্য ডেইলি ডেটা
+        daily_stats = orders.values('created_at__date').annotate(
+            income=Sum('total_amount'),
+            count=Count('id')
+        ).order_by('created_at__date')
+
+        return Response({
+            "summary": {
+                "total_income": float(total_income),
+                "total_orders": total_orders_count,
+                "start_date": str(start_date),
+                "end_date": str(end_date)
+            },
+            "daily_stats": list(daily_stats) # list এ কনভার্ট করলে ফ্রন্টএন্ড সহজে পায়
+        })
+        
+class OrderSalesAnalyticsView(APIView):
+    permission_classes = [IsAdminUser]
+
+    def get(self, request):
+        filter_type = request.query_params.get('filter', '7days')
+        start_date_str = request.query_params.get('start_date')
+        end_date_str = request.query_params.get('end_date')
+        
+        today = timezone.now().date()
+        start_date = today
+        end_date = today
+
+        # ১. সকল লজিক এক জায়গায় (Single Logic Block)
+        try:
+            if filter_type == 'today':
+                start_date = today
+                end_date = today
+            elif filter_type == 'custom' and start_date_str and end_date_str:
+                start_date = datetime.strptime(start_date_str, '%Y-%m-%d').date()
+                end_date = datetime.strptime(end_date_str, '%Y-%m-%d').date()
+            elif filter_type == '15days':
+                start_date = today - timedelta(days=15)
+                end_date = today
+            elif filter_type == '1month':
+                start_date = today - timedelta(days=30)
+                end_date = today
+            else: # Default 7 days
+                start_date = today - timedelta(days=7)
+                end_date = today
+        except ValueError:
+            return Response({"error": "Invalid date format. Use YYYY-MM-DD"}, status=400)
+
+        # ২. ডাটা ফিল্টার করা (অবশ্যই status__iexact ব্যবহার করবি)
+        orders_query = Order.objects.filter(
+            created_at__date__range=[start_date, end_date],
+            status__iexact='completed'
+        )
+
+        print(f"Total orders found for {filter_type}: {orders_query.count()}")
+
+        # ৩. টোটাল ইনকাম এবং টোটাল অর্ডার সংখ্যা (Coalesce দিয়ে None হ্যান্ডেল করা)
+        summary_data = orders_query.aggregate(
+            total_income=Coalesce(Sum('total_amount'), Value(0, output_field=DecimalField())),
+            total_orders=Count('id')
+        )
+
+        # ৪. ডেইলি স্ট্যাটিস্টিকস
+        daily_breakdown = orders_query.values('created_at__date').annotate(
+            income=Coalesce(Sum('total_amount'), Value(0, output_field=DecimalField())),
+            order_count=Count('id')
+        ).order_by('-created_at__date')
+
+        return Response({
+            "status": "success",
+            "range": {
+                "start": start_date,
+                "end": end_date
+            },
+            "summary": {
+                "total_income": float(summary_data['total_income']),
+                "total_orders": summary_data['total_orders']
+            },
+            "daily_stats": list(daily_breakdown)
         })
