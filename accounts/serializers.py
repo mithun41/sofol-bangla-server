@@ -53,8 +53,12 @@ class MyTokenObtainPairSerializer(TokenObtainPairSerializer):
 # ২. ইউজার প্রোফাইল দেখার বা আপডেট করার সিরিয়ালাইজার
 # ১. ইউজার প্রোফাইল দেখার জন্য
 class UserProfileSerializer(serializers.ModelSerializer):
+    # ইমেজ বা ফাইল ফিল্ডের ফুল ইউআরএল পাওয়ার জন্য SerializerMethodField ব্যবহার করা ভালো
+    profile_picture = serializers.SerializerMethodField()
+    
     total_offer_earned = serializers.DecimalField(max_digits=12, decimal_places=2, read_only=True)
     lifetime_offer_points = serializers.DecimalField(max_digits=12, decimal_places=2, read_only=True)
+
     class Meta:
         model = User
         fields = [
@@ -65,13 +69,23 @@ class UserProfileSerializer(serializers.ModelSerializer):
             'referral_bonus', 'matching_bonus', 
             'leadership_bonus', 'rank_reward_bonus', 'total_offer_earned', 'lifetime_offer_points',
         ]
-        # এই ফিল্ডগুলো ইউজার নিজে এডিট করতে পারবে না
         read_only_fields = [
             'username', 'email', 'balance', 'points', 'reff_id', 
             'placement_id', 'role', 'status', 'star_level',
             'referral_bonus', 'matching_bonus', 'leadership_bonus', 'rank_reward_bonus'
         ]
 
+    # প্রোফাইল পিকচারের ফুল ইউআরএল জেনারেট করার ফাংশন
+    def get_profile_picture(self, obj):
+        if obj.profile_picture:
+            request = self.context.get('request')
+            if request is not None:
+                # এটি অটোমেটিক https://mithun41.pythonanywhere.com যোগ করে দেবে
+                return request.build_absolute_uri(obj.profile_picture.url)
+            # যদি রিকোয়েস্ট না থাকে তবে শুধু পাথ রিটার্ন করবে
+            return obj.profile_picture.url
+        return None
+    
 # ২. অ্যাডমিন প্যানেলে সব ইউজার লিস্ট দেখার জন্য
 class UserListSerializer(serializers.ModelSerializer):
     reff_id_input = serializers.CharField(write_only=True, required=False, allow_blank=True)
