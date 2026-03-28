@@ -550,3 +550,37 @@ class ResetPasswordView(APIView):
             "status": "error",
             "message": list(serializer.errors.values())[0][0]
         }, status=status.HTTP_400_BAD_REQUEST)
+        
+class MyNetworkView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        user = request.user
+        
+        # ১. সরাসরি রেফারেল (Direct Referrals)
+        referrals = User.objects.filter(referred_by=user).order_by('-createdAt')
+        
+        # ২. পুরো ডাউনলাইন টিম (Recursive Placement List)
+        # এখানে আমরা ইউজারের নিচের সব মেম্বারকে ধরবো যারা তার 'বাম' বা 'ডান' ট্রিতে আছে
+        def get_all_downline(node):
+            downline = []
+            children = User.objects.filter(placement_under=node)
+            for child in children:
+                downline.append(child)
+                downline.extend(get_all_downline(child)) # নিচের লেভেলে খোঁজা
+            return downline
+
+        all_team_members = get_all_downline(user)
+
+        return Response({
+            "referrals": UserListSerializer(referrals, many=True).data,
+            "all_team": UserListSerializer(all_team_members, many=True).data,
+            "counts": {
+                "username": user.username,
+                "total_referrals": referrals.count(),
+                "left_count": user.left_count,
+                "right_count": user.right_count,
+                "total_left": user.total_left,
+                "total_right": user.total_right,
+            }
+        })
