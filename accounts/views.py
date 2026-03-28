@@ -130,16 +130,24 @@ class UserProfileView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
-        # সরাসরি সিরিয়ালাইজার ব্যবহার করো, এতে সব নতুন ফিল্ড অটো চলে আসবে
-        serializer = UserProfileSerializer(request.user)
+        # এখানে context={'request': request} যোগ করা হয়েছে
+        serializer = UserProfileSerializer(request.user, context={'request': request})
         return Response(serializer.data)
 
     def patch(self, request):
-        # আপডেট করার জন্য আমরা তোমার লেখা UserProfileUpdateSerializer ব্যবহার করতে পারি
-        serializer = UserProfileUpdateSerializer(request.user, data=request.data, partial=True)
+        # আপডেটের সময়ও কনটেক্সট দেওয়া ভালো, যাতে রিটার্ন করা ডেটাতে ফুল ইমেজ লিঙ্ক থাকে
+        serializer = UserProfileUpdateSerializer(
+            request.user, 
+            data=request.data, 
+            partial=True, 
+            context={'request': request}
+        )
         if serializer.is_valid():
             serializer.save()
-            return Response({"message": "Profile updated successfully!", "data": serializer.data})
+            return Response({
+                "message": "Profile updated successfully!", 
+                "data": serializer.data
+            })
         return Response(serializer.errors, status=400)
     
 
