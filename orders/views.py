@@ -1,5 +1,6 @@
 from datetime import timedelta
 from datetime import datetime
+from decimal import Decimal
 from django.db.models import Sum, Count, Value, DecimalField # এখানে Value আর DecimalField যোগ কর
 from django.db.models.functions import Coalesce
 
@@ -32,15 +33,13 @@ class OrderCreateView(APIView):
             return Response({"error": "আপনার কার্টটি খালি!"}, status=status.HTTP_400_BAD_REQUEST)
 
         # ১. ইউজার স্ট্যাটাস চেক
-        raw_status = getattr(user, 'status', 'inactive')
-        if not raw_status and hasattr(user, 'profile'):
-            raw_status = getattr(user.profile, 'status', 'inactive')
-        
-        is_active_user = (str(raw_status).lower().strip() == 'active')
+        is_active_user = False
+        if hasattr(user, 'status'):
+            is_active_user = (str(user.status).lower().strip() == 'active')
 
         try:
             with transaction.atomic():
-                calculated_subtotal = 0
+                calculated_subtotal = Decimal('0.00')
                 total_pv = 0
                 processed_items = []
 
@@ -51,25 +50,20 @@ class OrderCreateView(APIView):
                     if product.stock < qty:
                         raise Exception(f"{product.name} এর পর্যাপ্ত স্টক নেই!")
 
-                    base_price = float(product.price)
-                    unit_pv = float(product.point_value or 0)
+                    base_price = Decimal(str(product.price))
+                    unit_pv = int(product.point_value or 0)
                     
                     if is_active_user:
-                        # একটিভ ইউজার: ডিসকাউন্ট পাবে, কিন্তু অর্ডারের রেকর্ডে PV থাকবে অফার হিসাবের জন্য
-                        discount = unit_pv * 2
+                        # ৫ PV = ১০ টাকা ডিসকাউন্ট (PV * 2)
+                        discount = Decimal(str(unit_pv * 2))
                         final_unit_price = base_price - discount
-                        final_unit_pv = unit_pv # এখানে ০ দিও না, অরিজিনাল PV টা দাও
                     else:
-                        # ইন-একটিভ ইউজার: ফুল প্রাইস এবং আইডি এক্টিভেশন PV
                         final_unit_price = base_price
-                        final_unit_pv = unit_pv 
 
                     calculated_subtotal += (final_unit_price * qty)
-                    total_pv += (final_unit_pv * qty) # এখন এখানে সঠিক ভ্যালু জমা হবে
+                    total_pv += (unit_pv * qty)
 
-                    
-
-                    # স্টক আপডেট
+                    # স্টক কমানো
                     product.stock -= qty
                     product.save()
 
@@ -77,22 +71,20 @@ class OrderCreateView(APIView):
                         'product': product,
                         'quantity': qty,
                         'price': final_unit_price,
-                        'pv': final_unit_pv
+                        'pv': unit_pv
                     })
 
-                # শিপিং কস্ট বাদ দেওয়া হয়েছে
-                total_amount = calculated_subtotal 
-
-                # ২. মেইন অর্ডার সেভ
+                # ২. শিপিং চার্জ ছাড়া মেইন অর্ডার সেভ
+                # এখানে total_amount সরাসরি subtotal এর সমান হবে
                 order = Order.objects.create(
                     user=user,
                     name=data.get('name'),
                     phone=data.get('phone'),
                     address=data.get('address'),
                     city=data.get('city', ''),
-                    courier=data.get('courier', 'Sundarban'),
+                    courier=data.get('courier', 'Sundarban Courier'),
                     subtotal=calculated_subtotal,
-                    total_amount=total_amount, # সাবটোটাল আর টোটাল এখন সমান
+                    total_amount=calculated_subtotal, # 👈 কোনো শিপিং যোগ হবে না
                     total_pv=total_pv,
                     payment_method=data.get('payment_method', 'cod'),
                     transaction_id=data.get('transaction_id', ''),
@@ -113,14 +105,14 @@ class OrderCreateView(APIView):
 
                 return Response({
                     "success": True,
-                    "message": "অর্ডারটি সফলভাবে সম্পন্ন হয়েছে!",
+                    "message": "অর্ডারটি সফলভাবে সম্পন্ন হয়েছে!",
                     "order_id": order.id,
-                    "payable_amount": total_amount
+                    "payable_amount": float(calculated_subtotal)
                 }, status=status.HTTP_201_CREATED)
     
         except Exception as e:
+            print(f"DEBUG ERROR: {str(e)}") # এটি আপনার সার্ভার লগে দেখাবে
             return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
-
 # --- বাকি অ্যাডমিন ও ইউজার ভিউগুলো একই থাকবে ---
 class AdminOrderListView(generics.ListAPIView):
     queryset = Order.objects.all().order_by("-created_at")
