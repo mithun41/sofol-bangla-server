@@ -5,12 +5,10 @@ from .models import BonusLog, User, GlobalFund, FundLog
 
 # --- FUND MANAGEMENT UTILITIES ---
 
-def distribute_money_to_funds(points):
-    if not points or Decimal(points) <= 0:
-        return
 
+def distribute_money_to_funds(points):
     total_money = Decimal(points) * 4
-    # নিশ্চিত করো ID=1 আছে, না থাকলে তৈরি করো
+    # Singleton pattern for GlobalFund
     fund, _ = GlobalFund.objects.get_or_create(id=1)
     
     distributions = {
@@ -22,49 +20,56 @@ def distribute_money_to_funds(points):
         'company_fund': total_money * Decimal('0.275'),
     }
 
-    try:
-        with transaction.atomic():
-            # ডাটাবেস লেভেলে ফান্ড রো-টাকে লক করো যেন অন্য কেউ একই সাথে আপডেট না করে
-            fund = GlobalFund.objects.select_for_update().get(id=1)
+    with transaction.atomic():
+        for field, amount in distributions.items():
+            current_val = getattr(fund, field)
+            setattr(fund, field, current_val + amount)
+            FundLog.objects.create(
+                fund_type=field, amount=amount, 
+                transaction_type='inbound', reason=f"Distribution from {points} points"
+            )
+        fund.save()
+def add_bonus_to_user(user, amount, bonus_type):
+    """
+    bonus_type হতে পারে: 'referral', 'matching', 'leadership', 'rank'
+    """
+    amount = Decimal(amount)
+    with transaction.atomic():
+        if bonus_type == 'referral':
+            user.referral_bonus += amount
+        elif bonus_type == 'matching':
+            user.matching_bonus += amount
+        elif bonus_type == 'leadership':
+            user.leadership_bonus += amount
+        elif bonus_type == 'rank':
+            user.rank_reward_bonus += amount
             
-            for field, amount in distributions.items():
-                current_val = getattr(fund, field) or Decimal('0') # যদি None থাকে তবে 0 ধরবে
-                setattr(fund, field, current_val + amount)
-                
-                FundLog.objects.create(
-                    fund_type=field, 
-                    amount=amount, 
-                    transaction_type='inbound', 
-                    reason=f"Point Inflow: {points} pts"
-                )
-            fund.save()
-    except Exception as e:
-        # এররটা প্রিন্ট করো যেন PythonAnywhere লগ-এ দেখতে পারো
-        print(f"FUND DISTRIBUTION ERROR: {str(e)}")
-        raise e # আবার রেইজ করো যেন অর্ডার আপডেটটাও ক্যানসেল হয় (ডাটা কনসিস্টেন্সি)
-
+        # মেইন ব্যালেন্সেও টাকা যোগ হবে যেন সে উইথড্র করতে পারে
+        user.balance += amount
+        user.save()
+        
+        # লগ রাখা
+        BonusLog.objects.create(user=user, amount=amount, reason=f"{bonus_type.capitalize()} Bonus Received")
 def deduct_from_fund(primary_fund_name, amount):
-    """বোনাস দেওয়ার আগে ফান্ড চেক করবে। না থাকলে কোম্পানি ফান্ড থেকে নিবে।"""
-    fund, created = GlobalFund.objects.get_or_create(id=1)
+    fund, _ = GlobalFund.objects.get_or_create(id=1)
     primary_balance = getattr(fund, primary_fund_name)
     company_balance = fund.company_fund
     amount = Decimal(amount)
 
-    if primary_balance >= amount:
-        setattr(fund, primary_fund_name, primary_balance - amount)
-        FundLog.objects.create(fund_type=primary_fund_name, amount=amount, transaction_type='outbound', reason="Bonus Payout")
-    elif (primary_balance + company_balance) >= amount:
-        remaining = amount - primary_balance
-        setattr(fund, primary_fund_name, 0)
-        fund.company_fund -= remaining
-        FundLog.objects.create(fund_type=primary_fund_name, amount=primary_balance, transaction_type='outbound', reason="Primary Fund Depleted")
-        FundLog.objects.create(fund_type='company_fund', amount=remaining, transaction_type='outbound', reason="Covered by Company Fund")
-    else:
-        return False
-    
-    fund.save()
-    return True
-
+    with transaction.atomic():
+        if primary_balance >= amount:
+            setattr(fund, primary_fund_name, primary_balance - amount)
+            FundLog.objects.create(fund_type=primary_fund_name, amount=amount, transaction_type='outbound', reason="Bonus distribution")
+        elif (primary_balance + company_balance) >= amount:
+            remaining = amount - primary_balance
+            setattr(fund, primary_fund_name, 0)
+            fund.company_fund -= remaining
+            FundLog.objects.create(fund_type=primary_fund_name, amount=primary_balance, transaction_type='outbound', reason="Partial bonus")
+            FundLog.objects.create(fund_type='company_fund', amount=remaining, transaction_type='outbound', reason="Bonus backup support")
+        else:
+            return False 
+        fund.save()
+        return True
 # --- LEADERSHIP BONUS LOGIC (NEW) ---
 
 def distribute_leadership_bonus(earner_user, bonus_amount):
@@ -205,21 +210,116 @@ def distribute_binary_matching(child_node):
             current_node = parent
             parent = parent.placement_under
 
-def calculate_commission(user):
-    if user.referred_by:
-        ref = user.referred_by
-        bonus_amount = Decimal(500)
-        
-        if deduct_from_fund('referral_fund', bonus_amount):
-            with transaction.atomic():
-                ref = User.objects.select_for_update().get(pk=ref.pk)
-                ref.balance += bonus_amount
-                BonusLog.objects.create(
-                    user=ref, amount=bonus_amount, 
-                    reason=f"Direct Referral: {user.username}"
-                )
-                ref.save()
-                # লিডারশিপ বোনাস ডিস্ট্রিবিউশন
-                distribute_leadership_bonus(ref, bonus_amount)
+def calculate_commission(new_active_user):
+    """
+    নতুন ইউজার একটিভ হলে আপলাইনদের বাইনারি ম্যাচিং চেক।
+    লজিক: ২য় বার থেকে চাইল্ডরা বোনাস পেলেই কেবল প্যারেন্ট বোনাস পাবে।
+    """
+    with transaction.atomic():
+        activation_amount = Decimal('4000.00')
+        matching_bonus_amt = activation_amount * Decimal('0.10') # ৪০০ টাকা
+
+        # --- ১. রেফারেল বোনাস ---
+        referrer = new_active_user.referred_by
+        if referrer and referrer.status == 'active':
+            ref_bonus = activation_amount * Decimal('0.125') # ৫০০ টাকা
+            if deduct_from_fund('referral_fund', ref_bonus):
+                referrer.referral_bonus += ref_bonus
+                referrer.balance += ref_bonus
+                referrer.save()
+                BonusLog.objects.create(user=referrer, amount=ref_bonus, reason=f"Referral Bonus from {new_active_user.username}")
+
+        # --- ২. বাইনারি ম্যাচিং লজিক (Recursive Logic) ---
+        current_node = new_active_user.placement_under
+        child_node = new_active_user
+
+        while current_node:
+            # শুধু কাউন্ট বাড়ানো (ট্রি ভিউ এর জন্য)
+            if child_node.position == 'left':
+                current_node.total_left += 1
+            else:
+                current_node.total_right += 1
+
+            # ম্যাচিং এলিজিবিলিটি চেক
+            if current_node.status == 'active':
+                left_child = User.objects.filter(placement_under=current_node, position='left').first()
+                right_child = User.objects.filter(placement_under=current_node, position='right').first()
+
+                if left_child and right_child and left_child.status == 'active' and right_child.status == 'active':
+                    # current_node এপর্যন্ত কতবার বোনাস পেয়েছে তা হলো current_node.paid_matches
+                    # চাইল্ডরা কতবার বোনাস পেয়েছে (অথবা নতুন একটিভ হয়েছে কি না) তার চেক
+                    # প্রথমবার: চাইল্ড একটিভ হলেই হবে (paid_matches ০ হলেও চলে)
+                    # ২য় বার থেকে: চাইল্ডের paid_matches ১ বা তার বেশি হতে হবে
+                    
+                    left_eligible_matches = 1 + left_child.paid_matches
+                    right_eligible_matches = 1 + right_child.paid_matches
+                    
+                    total_eligible_now = min(left_eligible_matches, right_eligible_matches)
+
+                    # যদি বর্তমান এলিজিবিলিটি আগের পেইড ম্যাচের চেয়ে বেশি হয়
+                    if total_eligible_now > current_node.paid_matches:
+                        new_matches_to_pay = total_eligible_now - current_node.paid_matches
+                        total_bonus = new_matches_to_pay * matching_bonus_amt
+
+                        if deduct_from_fund('matching_fund', total_bonus):
+                            current_node.matching_bonus += total_bonus
+                            current_node.balance += total_bonus
+                            current_node.paid_matches = total_eligible_now
+                            
+                            BonusLog.objects.create(
+                                user=current_node, 
+                                amount=total_bonus, 
+                                reason=f"Binary Matching Bonus ({new_matches_to_pay} pair)"
+                            )
+                            # লিডারশিপ বোনাস ডিস্ট্রিবিউশন
+                            distribute_leadership_bonus(current_node, total_bonus)
+
+            # র‍্যাঙ্ক আপডেট ও সেভ
+            update_user_rank(current_node)
+            current_node.save()
+
+            # উপরে উঠার লজিক
+            child_node = current_node
+            current_node = current_node.placement_under
+            
+
+
+def calculate_and_apply_order_benefits(order):
+    user = order.user
+    # অর্ডারের PV নিশ্চিত করা
+    order_pv = Decimal(str(order.total_pv or 0))
     
-    distribute_binary_matching(user)
+    print(f"DEBUG SERVICE: Order PV: {order_pv} | User Status: '{user.status}'")
+
+    if order_pv <= 0:
+        print("DEBUG SERVICE: No PV found in order.")
+        return False
+
+    with transaction.atomic():
+        # ইউজারের স্ট্যাটাস ছোট হাতের করে চেক করা (যাতে 'Active' বা 'active' দুইটাই কাজ করে)
+        user_status = str(user.status).strip().lower()
+
+        if user_status == 'active':
+            # একটিভ ইউজার: ২ গুণ টাকা অফার পাবে
+            offer_amount = order_pv * Decimal('2.0')
+            
+            user.lifetime_offer_points += order_pv
+            user.total_offer_earned += offer_amount
+            user.balance += offer_amount # সরাসরি মেইন ব্যালেন্সে যোগ
+            user.save()
+            
+            # বোনাস লগ রাখা
+            from accounts.models import BonusLog
+            BonusLog.objects.create(
+                user=user,
+                amount=offer_amount,
+                reason=f"Order Offer (2x PV) for Order #{order.id}"
+            )
+            print(f"DEBUG SERVICE: SUCCESS! Added {offer_amount} TK to balance.")
+            return True
+        else:
+            # ইন-একটিভ ইউজার: শুধু পয়েন্ট পাবে (আইডি এক্টিভেশনের জন্য)
+            user.points += order_pv
+            user.save()
+            print(f"DEBUG SERVICE: User inactive. Added {order_pv} points only.")
+            return True

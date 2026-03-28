@@ -23,7 +23,7 @@ from accounts.services import (
 from .models import BonusLog, FundLog, GlobalFund, User, WithdrawalRequest
 from .serializers import (
     ForgotPasswordSerializer, RegisterSerializer, ResetPasswordFinalSerializer, ResetPasswordSerializer, 
-    UserListSerializer, UserProfileUpdateSerializer, VerifyOTPSerializer, WithdrawalSerializer, 
+    UserListSerializer, UserProfileSerializer, UserProfileUpdateSerializer, VerifyOTPSerializer, WithdrawalSerializer, 
     BonusLogSerializer
 )
 from django.db.models import Sum
@@ -130,33 +130,17 @@ class UserProfileView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
-        user = request.user
-        profile_pic = request.build_absolute_uri(user.profile_picture.url) if user.profile_picture else None
-        return Response({
-            "name": user.name if user.name else user.username,
-            "username": user.username,
-            "email": user.email,
-            "phone": user.phone, 
-            "role": user.role,
-            "profile_picture": profile_pic,
-            "balance": float(user.balance),
-            "points": user.points,
-            "left_count": user.left_count,
-            "right_count": user.right_count,
-            "total_left": user.total_left,
-            "total_right": user.total_right,
-            "reff_id": user.reff_id,
-            "placement_id": user.placement_id,
-            "status": user.status,
-            "star_level": user.star_level,
-        })
+        # সরাসরি সিরিয়ালাইজার ব্যবহার করো, এতে সব নতুন ফিল্ড অটো চলে আসবে
+        serializer = UserProfileSerializer(request.user)
+        return Response(serializer.data)
 
     def patch(self, request):
-        user = request.user
-        if 'name' in request.data: user.name = request.data['name']
-        if 'profile_picture' in request.FILES: user.profile_picture = request.FILES['profile_picture']
-        user.save()
-        return Response({"message": "Profile updated successfully!"})
+        # আপডেট করার জন্য আমরা তোমার লেখা UserProfileUpdateSerializer ব্যবহার করতে পারি
+        serializer = UserProfileUpdateSerializer(request.user, data=request.data, partial=True)
+        if serializer.is_valid():
+            serializer.save()
+            return Response({"message": "Profile updated successfully!", "data": serializer.data})
+        return Response(serializer.errors, status=400)
     
 
 

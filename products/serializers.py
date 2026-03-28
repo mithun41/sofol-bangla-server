@@ -28,57 +28,51 @@ class CategorySerializer(serializers.ModelSerializer):
 class ProductSerializer(serializers.ModelSerializer):
     category_name = serializers.ReadOnlyField(source='category.name')
     
-    # আমরা অরিজিনাল প্রাইস এবং ডিসকাউন্ট প্রাইস দুইটাই রাখবো
-    # যাতে ফ্রন্টএন্ডে '৳৫০০  ৳৪৫০' এভাবে দেখানো যায়
+    # অরিজিনাল প্রাইস যেটা ডাটাবেস থেকে সরাসরি আসবে (যাতে ডুপ্লিকেট না হয়)
     original_price = serializers.ReadOnlyField(source='price')
+    
+    # ডিসকাউন্ট এবং ডিসপ্লে প্রাইস ক্যালকুলেট করার জন্য আলাদা নাম ব্যবহার করা ভালো
     discount_price = serializers.SerializerMethodField()
-    # আমরা মেইন 'price' ফিল্ডটাকেও মেথড দিয়ে কন্ট্রোল করবো
-    price = serializers.SerializerMethodField()
+    display_price = serializers.SerializerMethodField()
 
     class Meta:
         model = Product
-        fields = '__all__' # এখানে সব ফিল্ড থাকবে, সাথে উপরে ডিক্লেয়ার করাগুলোও আসবে
+        # fields = '__all__' রাখলে ডাটাবেসের 'price' অটো চলে আসবে
+        fields = '__all__' 
 
     def get_discount_price(self, obj):
-        """ইউজার একটিভ থাকলে ডিসকাউন্ট করা প্রাইসটা কত হবে সেটা ক্যালকুলেট করা"""
+        """ইউজার একটিভ থাকলে ডিসকাউন্ট ক্যালকুলেট করা"""
         request = self.context.get('request')
-        base_price = float(obj.price)
-        pv = float(obj.point_value or 0)
+        try:
+            # এখানে সরাসরি float না করে Decimal ব্যবহার করা সেফ, তবে তোর আগের লজিক অনুযায়ী float রাখা হলো
+            base_price = float(obj.price)
+            pv = float(obj.point_value or 0)
 
-        if request and request.user.is_authenticated:
-            # ইউজার একটিভ কি না চেক (তোর লজিক অনুযায়ী)
-            u_status = getattr(request.user, 'status', '').lower()
-            if not u_status and hasattr(request.user, 'profile'):
-                u_status = getattr(request.user.profile, 'status', '').lower()
-
-            if u_status == 'active' and not request.user.is_staff:
-                return round(base_price - (pv * 2), 2)
+            if request and request.user.is_authenticated:
+                u_status = getattr(request.user, 'status', '').lower()
+                
+                # যদি ইউজার একটিভ থাকে এবং অ্যাডমিন/স্টাফ না হয় তবেই ডিসকাউন্ট
+                if u_status == 'active' and not request.user.is_staff:
+                    # তোর লজিক: প্রাইস - (পয়েন্ট * ২)
+                    return round(base_price - (pv * 2), 2)
+        except (ValueError, TypeError):
+            pass
         
-        return None # একটিভ না হলে ডিসকাউন্ট প্রাইস দেখানোর দরকার নেই
+        return None
 
-    def get_price(self, obj):
-        """মেইন প্রাইস ফিল্ড যেটা শপ পেজে শো করবে"""
+    def get_display_price(self, obj):
+        """ফ্রন্টএন্ডে যেটা মেইন প্রাইস হিসেবে দেখাবে"""
         discount = self.get_discount_price(obj)
-        # যদি ডিসকাউন্ট থাকে তবে ডিসকাউন্ট প্রাইস দেখাবে, নাহলে অরিজিনাল
         return discount if discount is not None else float(obj.price)
 
     def validate(self, data):
-        # তোর আগের ভ্যালিডেশন লজিক ঠিক আছে
-        request = self.context.get('request')
-        if request and request.method in ['POST', 'PUT', 'PATCH']:
-            if 'price' in request.data:
-                data['price'] = request.data['price']
-            if 'point_value' in request.data:
-                data['point_value'] = request.data['point_value']
-        return data
-
-    def validate(self, data):
         """
-        অ্যাডমিন প্যানেল থেকে ডাটা আপডেট করার সময় যাতে ভুল করে 
-        ডিসকাউন্ট প্রাইস সেভ না হয়ে যায়, তার জন্য অরিজিনাল ইনপুট নেওয়া।
+        অ্যাডমিন প্যানেল থেকে ডাটা সেভ করার সময় ভ্যালিডেশন।
+        একই মেথড একবার লিখলেই যথেষ্ট।
         """
         request = self.context.get('request')
         if request and request.method in ['POST', 'PUT', 'PATCH']:
+            # ইনপুট থেকে সরাসরি ভ্যালু নিয়ে ডাটাতে সেট করা
             if 'price' in request.data:
                 data['price'] = request.data['price']
             if 'point_value' in request.data:

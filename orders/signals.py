@@ -1,40 +1,40 @@
 from django.db.models.signals import post_save
 from django.dispatch import receiver
-from django.db import transaction
-from .models import Order
+from django.db import transaction, models
+from decimal import Decimal
+from django.apps import apps
+from django.db.models import F # যোগফল (Addition) করার জন্য এটি জরুরি
 
-@receiver(post_save, sender=Order)
+@receiver(post_save, sender='orders.Order')
 def handle_order_status_updates(sender, instance, created, **kwargs):
-    """অর্ডার কমপ্লিট হলে পয়েন্ট অ্যাড করার সিগন্যাল"""
-    if not created:  # যখন অর্ডার আপডেট করা হয়
-        # ডাটাবেস থেকে লেটেস্ট স্ট্যাটাস চেক করা ভালো
-        current_status = instance.status.strip()
-
-        if current_status == 'Completed' and not instance.points_awarded:
+    if not created:
+        raw_status = str(instance.status).strip().lower()
+        
+        # ১. চেক: স্ট্যাটাস 'completed' এবং আগে কি এই অর্ডারের পয়েন্ট দেওয়া হয়েছে?
+        if raw_status == 'completed' and not instance.points_awarded:
             if instance.user:
-                try:
+                User = apps.get_model('accounts', 'User')
+                order_pv = Decimal(str(instance.total_pv or 0))
+                
+                if order_pv > 0:
                     with transaction.atomic():
-                        # ১. সরাসরি অর্ডারের total_pv ফিল্ড ব্যবহার করা (তোর ভিউতে এটা অলরেডি ক্যালকুলেটেড)
-                        # মেম্বারদের জন্য এটা ০ থাকবে, নতুনদের জন্য ৫০/১০০ থাকবে।
-                        points_to_add = instance.total_pv
+                        # ২. ইউজার যদি অলরেডি একটিভ থাকে
+                        if str(instance.user.status).lower() == 'active':
+                            offer_amount = order_pv * Decimal('2.0') # ৫ PV = ১০ টাকা
+                            
+                            # এখানে balance আপডেট করা বাদ দেওয়া হয়েছে
+                            User.objects.filter(pk=instance.user.pk).update(
+                                total_offer_earned=F('total_offer_earned') + offer_amount,
+                                lifetime_offer_points=F('lifetime_offer_points') + order_pv
+                            )
+                            print(f"✅ Added {offer_amount} TK to total_offer_earned (NOT in main balance)")
                         
-                        if points_to_add > 0:
-                            user = instance.user
-                            
-                            # ২. সিলেক্টিভ আপডেট (যাতে অন্য ডেটা লস না হয়)
-                            # আমরা ইউজারের পয়েন্ট বাড়াচ্ছি। User model-এর save() এর ভেতরের লজিক অটো কাজ করবে।
-                            user.points += points_to_add
-                            user.save() 
-                            
-                            # ৩. পয়েন্ট যে দেওয়া হয়েছে তা মার্ক করা
-                            # update() ব্যবহার করায় আবার এই সিগন্যালটা রান করবে না।
-                            Order.objects.filter(pk=instance.pk).update(points_awarded=True)
-                            
-                            print(f"SUCCESS: {points_to_add} points added to {user.username}. Current Total: {user.points}")
+                        # ৩. ইউজার যদি ইন-একটিভ থাকে (আইডি একটিভ করার পয়েন্ট)
                         else:
-                            # যদি পয়েন্ট ০ হয় (যেমন একটিভ মেম্বারদের ক্ষেত্রে), শুধু award মার্ক করে দাও
-                            Order.objects.filter(pk=instance.pk).update(points_awarded=True)
-                            print(f"INFO: Active member order, no points added for order {instance.id}")
+                            User.objects.filter(pk=instance.user.pk).update(
+                                points=F('points') + order_pv
+                            )
+                            print(f"✅ Added {order_pv} points to activation balance")
 
-                except Exception as e:
-                    print(f"ERROR adding points for Order {instance.id}: {str(e)}")
+                        # ৪. অর্ডারটি মার্ক করা যাতে ডাবল বোনাস না পায়
+                        sender.objects.filter(pk=instance.pk).update(points_awarded=True)

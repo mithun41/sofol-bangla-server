@@ -37,7 +37,7 @@ class OrderAdmin(admin.ModelAdmin):
             'fields': ('payment_method', 'sender_number', 'transaction_id')
         }),
         ('Order Calculation', {
-            'fields': ('subtotal', 'shipping_cost', 'total_amount')
+            'fields': ('subtotal',  'total_amount')
         }),
         ('Status & Points', {
             'fields': ('status', 'points_awarded')
