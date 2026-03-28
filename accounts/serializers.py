@@ -19,63 +19,60 @@ class MyTokenObtainPairSerializer(TokenObtainPairSerializer):
         data = super().validate(attrs)
         user = self.user
 
-        # তোর দেওয়া ফরম্যাট অনুযায়ী ডাটা অ্যাড করা
-        data['username'] = user.username
-        data['role'] = user.role
-        data['name'] = user.name
-        # প্রোফাইল পিকচার থাকলে ফুল URL দিবে, না থাকলে None
-        data['profile_picture'] = user.profile_picture.url if user.profile_picture else None
-        
-        # এক্সট্রা ইনফরমেশন যা ড্যাশবোর্ডে লাগবে
-        data['email'] = user.email
-        data['phone'] = user.phone
-        data['balance'] = float(user.balance)
-        data['points'] = user.points
-        data['left_count'] = user.left_count
-        data['right_count'] = user.right_count
-        data['total_left'] = user.total_left
-        data['total_right'] = user.total_right
-        data['reff_id'] = user.reff_id
-        data['placement_id'] = user.placement_id
-        data['status'] = user.status
-        data['star_level'] = user.star_level
-        
+        # ড্যাশবোর্ডের জন্য ইউজার ডাটা আপডেট
+        data.update({
+            'username': user.username,
+            'role': user.role,
+            'name': user.name,
+            'profile_picture': user.profile_picture.url if user.profile_picture else None,
+            'email': user.email,
+            'phone': user.phone,
+            
+            # --- মেইন ব্যালেন্স ও পয়েন্ট ---
+            'balance': float(user.balance),
+            'points': user.points,
+            
+            # --- ইউজারের ব্যক্তিগত বোনাস ফান্ড (User Dashboard Funds) ---
+            'referral_bonus': float(getattr(user, 'referral_bonus', 0)),
+            'matching_bonus': float(getattr(user, 'matching_bonus', 0)),
+            'leadership_bonus': float(getattr(user, 'leadership_bonus', 0)),
+            'rank_reward_bonus': float(getattr(user, 'rank_reward_bonus', 0)),
+            
+            # --- নেটওয়ার্ক স্ট্যাটাস ---
+            'left_count': user.left_count,
+            'right_count': user.right_count,
+            'total_left': user.total_left,
+            'total_right': user.total_right,
+            'reff_id': user.reff_id,
+            'placement_id': user.placement_id,
+            'status': user.status,
+            'star_level': user.star_level,
+        })
         return data
 
 # ২. ইউজার প্রোফাইল দেখার বা আপডেট করার সিরিয়ালাইজার
+# ১. ইউজার প্রোফাইল দেখার জন্য
 class UserProfileSerializer(serializers.ModelSerializer):
+    total_offer_earned = serializers.DecimalField(max_digits=12, decimal_places=2, read_only=True)
+    lifetime_offer_points = serializers.DecimalField(max_digits=12, decimal_places=2, read_only=True)
     class Meta:
         model = User
         fields = [
             'name', 'username', 'email', 'phone', 'role', 
             'profile_picture', 'balance', 'points', 'left_count', 
             'right_count', 'total_left', 'total_right', 'reff_id', 
-            'placement_id', 'status', 'star_level'
+            'placement_id', 'status', 'star_level',
+            'referral_bonus', 'matching_bonus', 
+            'leadership_bonus', 'rank_reward_bonus', 'total_offer_earned', 'lifetime_offer_points',
         ]
-        read_only_fields = ['username', 'email', 'balance', 'points', 'reff_id', 'placement_id', 'role']
+        # এই ফিল্ডগুলো ইউজার নিজে এডিট করতে পারবে না
+        read_only_fields = [
+            'username', 'email', 'balance', 'points', 'reff_id', 
+            'placement_id', 'role', 'status', 'star_level',
+            'referral_bonus', 'matching_bonus', 'leadership_bonus', 'rank_reward_bonus'
+        ]
 
-class UserProfileUpdateSerializer(serializers.ModelSerializer):
-    class Meta:
-        model = User
-        fields = ['name', 'email', 'phone', 'profile_picture', 'password']
-        extra_kwargs = {
-            'password': {'write_only': True, 'required': False},
-            'email': {'required': False},
-            'phone': {'required': False},
-        }
-
-    def update(self, instance, validated_data):
-        password = validated_data.pop('password', None)
-        if password:
-            instance.set_password(password) # পাসওয়ার্ড হ্যাশ করে সেভ করবে
-        
-        # বাকি ফিল্ডগুলো আপডেট করা
-        for attr, value in validated_data.items():
-            setattr(instance, attr, value)
-            
-        instance.save()
-        return instance
-    
+# ২. অ্যাডমিন প্যানেলে সব ইউজার লিস্ট দেখার জন্য
 class UserListSerializer(serializers.ModelSerializer):
     reff_id_input = serializers.CharField(write_only=True, required=False, allow_blank=True)
     placement_id_input = serializers.CharField(write_only=True, required=False, allow_blank=True)
@@ -89,99 +86,66 @@ class UserListSerializer(serializers.ModelSerializer):
             'points', 'balance', 'position', 'left_count', 'right_count',
             'referred_by_username', 'placement_under_username', 
             'reff_id_input', 'placement_id_input',
-            'status', 'star_level', 'role', 'createdAt', 'division'
+            'status', 'star_level', 'role', 'createdAt', 'division',
+            # অ্যাডমিন যেন সবার বোনাস দেখতে পারে
+            'referral_bonus', 'matching_bonus', 'leadership_bonus', 'rank_reward_bonus'
         )
 
+# ৩. প্রোফাইল আপডেট করার জন্য (আগের মতোই থাকবে)
+class UserProfileUpdateSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = User
+        fields = ['name', 'email', 'phone', 'profile_picture', 'password']
+        extra_kwargs = {
+            'password': {'write_only': True, 'required': False},
+            'email': {'required': False},
+            'phone': {'required': False},
+        }
+
+    def update(self, instance, validated_data):
+        password = validated_data.pop('password', None)
+        if password:
+            instance.set_password(password)
+        
+        for attr, value in validated_data.items():
+            setattr(instance, attr, value)
+            
+        instance.save()
+        return instance
 
 
 class RegisterSerializer(serializers.ModelSerializer):
-    # ১. Full Name ফিল্ড যোগ করা হলো
-    name = serializers.CharField(
-        required=True, 
-        max_length=150,
-        error_messages={"required": "Please enter your full name."}
-    )
-
-    # ২. ইউজারনেম ইউনিক থাকবে (আগের মতোই)
-    username = serializers.CharField(
-        required=True,
-        validators=[UniqueValidator(
-            queryset=User.objects.all(), 
-            message="This username is already taken."
-        )]
-    )
-    
-    # ৩. ফোন ফিল্ড থেকে UniqueValidator সরিয়ে দেওয়া হলো 
-    # যাতে এক নাম্বার দিয়ে অনেক আইডি খোলা যায়
-    phone = serializers.CharField(
-        required=True,
-        max_length=15
-    )
-
+    name = serializers.CharField(required=True)
+    username = serializers.CharField(validators=[UniqueValidator(queryset=User.objects.all())])
+    phone = serializers.CharField(required=True)
     reff_code_input = serializers.CharField(write_only=True, required=False, allow_blank=True)
     placement_id_input = serializers.CharField(write_only=True, required=False, allow_blank=True)
     position_input = serializers.CharField(write_only=True, required=False, allow_blank=True)
-    
-    email = serializers.EmailField(required=False, allow_null=True, allow_blank=True)
-    division = serializers.CharField(required=False, allow_blank=True)
 
     class Meta:
         model = User
-        # ৪. 'name' ফিল্ডটি fields লিস্টে অন্তর্ভুক্ত করা হলো
-        fields = (
-            'name', 'username', 'password', 'email', 'phone', 'division', 
-            'reff_code_input', 'placement_id_input', 'position_input'
-        )
-        extra_kwargs = {
-            'password': {'write_only': True},
-        }
-
-    # Custom field validation for Referral and Placement IDs
-    def validate_reff_code_input(self, value):
-        if value and not User.objects.filter(reff_id=value).exists():
-            raise serializers.ValidationError("Invalid Referral ID. User not found.")
-        return value
-
-    def validate_placement_id_input(self, value):
-        if value and not User.objects.filter(placement_id=value).exists():
-            raise serializers.ValidationError("Placement ID not found in our records.")
-        return value
+        fields = ('name', 'username', 'password', 'email', 'phone', 'division', 'reff_code_input', 'placement_id_input', 'position_input')
+        extra_kwargs = {'password': {'write_only': True}}
 
     def create(self, validated_data):
-        # ইনপুট থেকে নেটওয়ার্কিং ডাটাগুলো আলাদা করে নেওয়া
         reff_code = validated_data.pop('reff_code_input', None)
         placement_code = validated_data.pop('placement_id_input', None)
         pos_input = validated_data.pop('position_input', None)
-        user_division = validated_data.get('division', '')
-
-        # ইউজার তৈরি (এখানে name, phone সব ডাটাবেসে যাবে)
+        
         user = User.objects.create_user(**validated_data)
 
-        # ১. Referrer সেট করা
         if reff_code:
-            referrer = User.objects.filter(reff_id=reff_code).first()
-            if referrer:
-                user.referred_by = referrer
+            user.referred_by = User.objects.filter(reff_id=reff_code).first()
 
-        # ২. Placement সেট করা
         if placement_code:
             placer = User.objects.filter(placement_id=placement_code).first()
             if placer:
                 user.placement_under = placer
-                if pos_input in ['left', 'right']:
-                    user.position = pos_input
-                else:
-                    existing_left = User.objects.filter(placement_under=placer, position='left').exists()
-                    user.position = 'left' if not existing_left else 'right'
-        
-        # ৩. অটো-প্লেসমেন্ট লজিক
+                user.position = pos_input if pos_input in ['left', 'right'] else ('left' if not User.objects.filter(placement_under=placer, position='left').exists() else 'right')
         elif user.referred_by:
-            # এখানে আপনার কাস্টম ফাংশনটি কল হবে
-            from .utils import find_auto_placement_with_division # আপনার ফাইল অনুযায়ী পাথ ঠিক করে নিন
-            parent, pos = find_auto_placement_with_division(user.referred_by, user_division)
-            if parent:
-                user.placement_under = parent
-                user.position = pos
+            from .utils import find_auto_placement_with_division
+            parent, pos = find_auto_placement_with_division(user.referred_by, validated_data.get('division', ''))
+            user.placement_under, user.position = parent, pos
 
         user.save()
         return user

@@ -55,39 +55,32 @@ class Order(models.Model):
         return sum(item.point_value * item.quantity for item in self.items.all())
 
     def save(self, *args, **kwargs):
-        # ইউনিক অর্ডার আইডি জেনারেশন
+        # ১. ইউনিক অর্ডার আইডি জেনারেশন (নতুন অর্ডারের জন্য)
         if not self.order_number:
             new_id = generate_order_id()
             while Order.objects.filter(order_number=new_id).exists():
                 new_id = generate_order_id()
             self.order_number = new_id
 
-        # আপডেট চেক (পয়েন্ট এবং স্টক ম্যানেজমেন্ট)
+        # ২. স্টক রিস্টোর লজিক (শুধুমাত্র আপডেট বা পুরনো অর্ডারের জন্য)
         if self.pk:
-            old_order = Order.objects.get(pk=self.pk)
+            try:
+                # ডাটাবেস থেকে পুরনো অবজেক্টটি আনা হচ্ছে
+                old_instance = Order.objects.get(pk=self.pk)
+                
+                # যদি স্ট্যাটাস আগে 'Cancelled' না থাকে কিন্তু এখন 'Cancelled' করা হয়
+                if old_instance.status != 'Cancelled' and self.status == 'Cancelled':
+                    from products.models import Product
+                    with transaction.atomic():
+                        for item in self.items.all():
+                            Product.objects.filter(id=item.product_id).update(
+                                stock=models.F('stock') + item.quantity
+                            )
+                            print(f"DEBUG: Stock restored for product {item.product_id}")
+            except Order.DoesNotExist:
+                pass
 
-            # ১. পয়েন্ট অ্যাড লজিক (Completed হলে)
-            if old_order.status != 'Completed' and self.status == 'Completed':
-                if self.user and not self.points_awarded:
-                    total_points = self.calculate_total_points()
-                    if total_points > 0:
-                        with transaction.atomic():
-                            # সরাসরি ইউজারের পয়েন্ট আপডেট
-                            self.user.points += total_points
-                            self.user.save()
-                            self.points_awarded = True
-                            print(f"DEBUG: {total_points} points added to {self.user.username}")
-
-            # ২. স্টক রিস্টোর লজিক (Cancelled হলে)
-            elif old_order.status != 'Cancelled' and self.status == 'Cancelled':
-                from products.models import Product
-                with transaction.atomic():
-                    for item in self.items.all():
-                        Product.objects.filter(id=item.product_id).update(
-                            stock=models.F('stock') + item.quantity
-                        )
-                        print(f"DEBUG: Stock restored for product {item.product_id}")
-
+        # ৩. সুপার সেভ কল (পয়েন্ট ক্যালকুলেশন এখানে করবেন না, সিগন্যাল হ্যান্ডেল করবে)
         super().save(*args, **kwargs)
 
     def __str__(self):

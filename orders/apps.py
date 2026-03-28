@@ -5,4 +5,6 @@ class OrdersConfig(AppConfig):
     name = 'orders'
 
     def ready(self):
-        import orders.signals  # এই লাইনটি ছাড়া সিগন্যাল কাজ করবে না
+        # এই প্রিন্টটি দাও যাতে সার্ভার চালু হলেই বুঝতে পারো
+        print("\n✅ ORDERS APP IS READY AND SIGNALS ARE LOADING...\n")
+        import orders.signals

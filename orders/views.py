@@ -54,17 +54,20 @@ class OrderCreateView(APIView):
                     base_price = float(product.price)
                     unit_pv = float(product.point_value or 0)
                     
-                    # অফার লজিক
                     if is_active_user:
+                        # একটিভ ইউজার: ডিসকাউন্ট পাবে, কিন্তু অর্ডারের রেকর্ডে PV থাকবে অফার হিসাবের জন্য
                         discount = unit_pv * 2
                         final_unit_price = base_price - discount
-                        final_unit_pv = 0 
+                        final_unit_pv = unit_pv # এখানে ০ দিও না, অরিজিনাল PV টা দাও
                     else:
+                        # ইন-একটিভ ইউজার: ফুল প্রাইস এবং আইডি এক্টিভেশন PV
                         final_unit_price = base_price
                         final_unit_pv = unit_pv 
 
                     calculated_subtotal += (final_unit_price * qty)
-                    total_pv += (final_unit_pv * qty)
+                    total_pv += (final_unit_pv * qty) # এখন এখানে সঠিক ভ্যালু জমা হবে
+
+                    
 
                     # স্টক আপডেট
                     product.stock -= qty
