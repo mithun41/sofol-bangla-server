@@ -1,3 +1,5 @@
+from decimal import Decimal
+
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status, permissions
@@ -72,39 +74,44 @@ class POSOrderCreate(APIView):
                 raw_status = getattr(customer, 'status', 'inactive')
                 is_active = (str(raw_status).lower().strip() == 'active')
 
-                total_amount = 0
-                total_pv = 0
+                # ✅ ফ্লোটের বদলে ডেসিমাল ব্যবহার
+                total_amount = Decimal('0.00')
+                total_pv = Decimal('0.00')
                 order_items_data = []
 
                 for item in items:
                     product = Product.objects.select_for_update().get(id=item['product_id'])
-                    qty = int(item['quantity'])
+                    # কোয়ান্টিটিকে ডেসিমাল স্ট্রিং থেকে কনভার্ট করা সেফ
+                    qty = Decimal(str(item.get('quantity', 1)))
 
                     if product.stock < qty:
                         raise Exception(f"{product.name} আউট অফ স্টক! আছে: {product.stock}")
 
-                    original_price = float(product.price)
-                    pv_unit = float(product.point_value or 0)
+                    # ✅ ডাটাবেস ভ্যালুগুলোকে Decimal হিসেবে ধরা
+                    original_price = Decimal(str(product.price))
+                    pv_unit = Decimal(str(product.point_value or '0.00'))
+                    discount_multiplier = Decimal('2.00')
                     
-                    # ✅ ডিসকাউন্ট লজিক: ১ পয়েন্ট = ২ টাকা অফ
                     if is_active:
-                        final_price = original_price - (pv_unit * 2)
-                        final_pv = 0
+                        # ডিসকাউন্ট লজিক: ১ পয়েন্ট = ২ টাকা অফ
+                        final_price = original_price - (pv_unit * discount_multiplier)
+                        final_pv = Decimal('0.00')
                     else:
                         final_price = original_price
                         final_pv = pv_unit
 
+                    # টোটাল আপডেট (টাইপ সেফ ক্যালকুলেশন)
                     total_amount += (final_price * qty)
                     total_pv += (final_pv * qty)
 
                     # স্টক আপডেট
-                    product.stock -= qty
+                    product.stock -= int(qty)
                     product.save()
 
                     order_items_data.append({
                         'product_id': product.id,
                         'product_name': product.name,
-                        'quantity': qty,
+                        'quantity': int(qty),
                         'price': final_price,
                         'point_value': final_pv
                     })
@@ -135,22 +142,28 @@ class POSOrderCreate(APIView):
                     )
 
                 # ফান্ড এবং পয়েন্ট ডিস্ট্রিবিউশন
-                if total_pv > 0:
-                    distribute_money_to_funds(total_pv)
+                if total_pv > Decimal('0.00'):
+                    # ফান্ড সার্ভিস যদি float চায় তবে float() এ কনভার্ট করে পাঠানো
+                    distribute_money_to_funds(float(total_pv))
+                    
+                    # পয়েন্ট আপডেট (Decimal + F expression compatibility)
                     User.objects.filter(id=customer.id).update(points=F('points') + total_pv)
                     
                     customer.refresh_from_db() 
-                    if customer.points >= 1000 and customer.status != 'active':
+                    # কাস্টমার পয়েন্ট চেক করার সময়ও ডেসিমাল ব্যবহার
+                    if Decimal(str(customer.points)) >= Decimal('1000.00') and customer.status != 'active':
                         customer.status = 'active'
                         customer.save()
 
                 return Response({
                     "success": True,
                     "order_id": order.id,
-                    "total": total_amount,
-                    "added_points": total_pv,
+                    "total": float(total_amount), # ফ্রন্টএন্ডে পাঠানোর সময় float করা যেতে পারে
+                    "added_points": float(total_pv),
                     "user_status": customer.status
                 }, status=status.HTTP_201_CREATED)
 
         except Exception as e:
+            # এররটা লগ করে রাখা ভালো
+            print(f"POS Order Error: {str(e)}")
             return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
