@@ -5,7 +5,6 @@ from django.db import transaction
 from django.db.models import F, Q
 from rest_framework_simplejwt.authentication import JWTAuthentication
 from django.contrib.auth import get_user_model
-from decimal import Decimal  # ✅ ডেসিমাল ইম্পোর্ট করা হয়েছে
 
 from products.models import Product
 from orders.models import Order, OrderItem
@@ -22,6 +21,7 @@ class POSProductSearch(APIView):
     def get(self, request):
         query = request.query_params.get('q', '').strip()
         if query:
+            # ✅ এখানে 'barcode' এর বদলে 'barcode_number' ব্যবহার করা হয়েছে
             products = Product.objects.filter(
                 Q(barcode_number=query) | 
                 Q(name__icontains=query) | 
@@ -46,7 +46,7 @@ class POSCustomerSearch(APIView):
         serializer = POSCustomerSerializer(customers, many=True)
         return Response(serializer.data)
 
-# ৩. অর্ডার তৈরি লজিক (নিখুঁত ডেসিমাল ক্যালকুলেশনসহ)
+# ৩. অর্ডার তৈরি লজিক (মেম্বার ডিসকাউন্ট এবং পয়েন্ট ডিস্ট্রিবিউশন)
 class POSOrderCreate(APIView):
     authentication_classes = [JWTAuthentication]
     permission_classes = [permissions.IsAdminUser]
@@ -68,32 +68,29 @@ class POSOrderCreate(APIView):
 
         try:
             with transaction.atomic():
+                # মেম্বার স্ট্যাটাস চেক
                 raw_status = getattr(customer, 'status', 'inactive')
                 is_active = (str(raw_status).lower().strip() == 'active')
 
-                # ✅ ফ্লোটের বদলে ডেসিমাল ইনিশিয়ালাইজ করা হয়েছে
-                total_amount = Decimal('0.00')
-                total_pv = Decimal('0.00')
+                total_amount = 0
+                total_pv = 0
                 order_items_data = []
 
                 for item in items:
                     product = Product.objects.select_for_update().get(id=item['product_id'])
-                    qty = Decimal(str(item['quantity'])) # কোয়ান্টিটিও ডেসিমাল
+                    qty = int(item['quantity'])
 
                     if product.stock < qty:
                         raise Exception(f"{product.name} আউট অফ স্টক! আছে: {product.stock}")
 
-                    # ✅ ক্যালকুলেশনে ডেসিমাল ব্যবহার
-                    original_price = product.price # অলরেডি ডেসিমাল
-                    pv_unit = Decimal(str(product.point_value or 0))
-                    discount_rate = Decimal('2.00')
+                    original_price = float(product.price)
+                    pv_unit = float(product.point_value or 0)
                     
+                    # ✅ ডিসকাউন্ট লজিক: ১ পয়েন্ট = ২ টাকা অফ
                     if is_active:
-                        # মেম্বার হলে ডিসকাউন্ট পাবে, কিন্তু পয়েন্ট পাবে না
-                        final_price = original_price - (pv_unit * discount_rate)
-                        final_pv = Decimal('0.00')
+                        final_price = original_price - (pv_unit * 2)
+                        final_pv = 0
                     else:
-                        # মেম্বার না হলে ফুল প্রাইস, এবং পয়েন্ট পাবে
                         final_price = original_price
                         final_pv = pv_unit
 
@@ -101,13 +98,13 @@ class POSOrderCreate(APIView):
                     total_pv += (final_pv * qty)
 
                     # স্টক আপডেট
-                    product.stock -= int(qty)
+                    product.stock -= qty
                     product.save()
 
                     order_items_data.append({
                         'product_id': product.id,
                         'product_name': product.name,
-                        'quantity': int(qty),
+                        'quantity': qty,
                         'price': final_price,
                         'point_value': final_pv
                     })
@@ -139,7 +136,7 @@ class POSOrderCreate(APIView):
 
                 # ফান্ড এবং পয়েন্ট ডিস্ট্রিবিউশন
                 if total_pv > 0:
-                    distribute_money_to_funds(float(total_pv)) # এখানে float লাগতে পারে যদি ফাংশনটি ওভাবে লেখা হয়
+                    distribute_money_to_funds(total_pv)
                     User.objects.filter(id=customer.id).update(points=F('points') + total_pv)
                     
                     customer.refresh_from_db() 
@@ -150,12 +147,10 @@ class POSOrderCreate(APIView):
                 return Response({
                     "success": True,
                     "order_id": order.id,
-                    "total": float(total_amount),
-                    "added_points": float(total_pv),
+                    "total": total_amount,
+                    "added_points": total_pv,
                     "user_status": customer.status
                 }, status=status.HTTP_201_CREATED)
 
         except Exception as e:
-            # প্রিন্ট করে রাখলাম যাতে কনসোলে দেখা যায় আসল ঝামেলা কি
-            print(f"POS Order Error: {str(e)}") 
             return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
