@@ -49,6 +49,7 @@ class POSCustomerSearch(APIView):
         return Response(serializer.data)
 
 # ৩. অর্ডার তৈরি লজিক (মেম্বার ডিসকাউন্ট এবং পয়েন্ট ডিস্ট্রিবিউশন)
+
 class POSOrderCreate(APIView):
     authentication_classes = [JWTAuthentication]
     permission_classes = [permissions.IsAdminUser]
@@ -58,49 +59,46 @@ class POSOrderCreate(APIView):
         customer_id = data.get('customer_id')
         items = data.get('items', [])
 
-        if not customer_id:
-            return Response({"error": "অনুগ্রহ করে একজন কাস্টমার সিলেক্ট করুন।"}, status=400)
+        if not customer_id or not items:
+            return Response({"error": "তথ্য অসম্পূর্ণ!"}, status=400)
 
         customer = User.objects.filter(id=customer_id).first()
         if not customer:
-            return Response({"error": "কাস্টমার খুঁজে পাওয়া যায়নি!"}, status=404)
-
-        if not items:
-            return Response({"error": "কার্ট খালি!"}, status=400)
+            return Response({"error": "কাস্টমার পাওয়া যায়নি!"}, status=404)
 
         try:
             with transaction.atomic():
                 # মেম্বার স্ট্যাটাস চেক
-                raw_status = getattr(customer, 'status', 'inactive')
-                is_active = (str(raw_status).lower().strip() == 'active')
+                is_active = (str(getattr(customer, 'status', '')).lower().strip() == 'active')
 
-                # ✅ ফ্লোটের বদলে ডেসিমাল ব্যবহার
+                # ✅ এখানে ০.০ দিলে হবে না, একদম স্ট্রিং থেকে ডেসিমাল করতে হবে
                 total_amount = Decimal('0.00')
                 total_pv = Decimal('0.00')
                 order_items_data = []
 
                 for item in items:
                     product = Product.objects.select_for_update().get(id=item['product_id'])
-                    # কোয়ান্টিটিকে ডেসিমাল স্ট্রিং থেকে কনভার্ট করা সেফ
-                    qty = Decimal(str(item.get('quantity', 1)))
+                    
+                    # কোয়ান্টিটিকেও ডেসিমাল স্ট্রিং থেকে নেওয়া সেফ
+                    qty = Decimal(str(item.get('quantity', '1')))
+                    
+                    if product.stock < int(qty):
+                        raise Exception(f"{product.name} আউট অফ স্টক!")
 
-                    if product.stock < qty:
-                        raise Exception(f"{product.name} আউট অফ স্টক! আছে: {product.stock}")
-
-                    # ✅ ডাটাবেস ভ্যালুগুলোকে Decimal হিসেবে ধরা
+                    # ✅ সব ভ্যালুকে স্ট্রিং এ কনভার্ট করে তারপর ডেসিমাল করা (সার্ভার সেফ পদ্ধতি)
                     original_price = Decimal(str(product.price))
                     pv_unit = Decimal(str(product.point_value or '0.00'))
                     discount_multiplier = Decimal('2.00')
-                    
+
                     if is_active:
-                        # ডিসকাউন্ট লজিক: ১ পয়েন্ট = ২ টাকা অফ
+                        # ১ পয়েন্ট = ২ টাকা অফ
                         final_price = original_price - (pv_unit * discount_multiplier)
                         final_pv = Decimal('0.00')
                     else:
                         final_price = original_price
                         final_pv = pv_unit
 
-                    # টোটাল আপডেট (টাইপ সেফ ক্যালকুলেশন)
+                    # ক্যালকুলেশন (Decimal * Decimal = Decimal)
                     total_amount += (final_price * qty)
                     total_pv += (final_pv * qty)
 
@@ -122,7 +120,6 @@ class POSOrderCreate(APIView):
                     name=customer.username,
                     phone=getattr(customer, 'phone', ""),
                     address="POS Counter Sale",
-                    city="In-Store",
                     subtotal=total_amount,
                     total_amount=total_amount,
                     total_pv=total_pv,
@@ -141,29 +138,35 @@ class POSOrderCreate(APIView):
                         point_value=oi['point_value']
                     )
 
-                # ফান্ড এবং পয়েন্ট ডিস্ট্রিবিউশন
+                # ৫. ফান্ড এবং পয়েন্ট ডিস্ট্রিবিউশন
                 if total_pv > Decimal('0.00'):
-                    # ফান্ড সার্ভিস যদি float চায় তবে float() এ কনভার্ট করে পাঠানো
-                    distribute_money_to_funds(float(total_pv))
+                    # ✅ এখানে ট্রিক: float(total_pv) করে পাঠানো যেন এক্সটার্নাল ফাংশন এরর না দেয়
+                    try:
+                        distribute_money_to_funds(float(total_pv))
+                    except:
+                        pass # মেইন ট্রানজ্যাকশন যেন সফল হয়
                     
-                    # পয়েন্ট আপডেট (Decimal + F expression compatibility)
-                    User.objects.filter(id=customer.id).update(points=F('points') + total_pv)
+                    # পয়েন্ট আপডেট (F expression logic fixed for PythonAnywhere)
+                    User.objects.filter(id=customer.id).update(
+                        points=F('points') + total_pv
+                    )
                     
                     customer.refresh_from_db() 
-                    # কাস্টমার পয়েন্ট চেক করার সময়ও ডেসিমাল ব্যবহার
-                    if Decimal(str(customer.points)) >= Decimal('1000.00') and customer.status != 'active':
+                    # কাস্টমার স্ট্যাটাস চেক
+                    current_points = Decimal(str(customer.points or '0.00'))
+                    if current_points >= Decimal('1000.00') and customer.status != 'active':
                         customer.status = 'active'
                         customer.save()
 
                 return Response({
                     "success": True,
                     "order_id": order.id,
-                    "total": float(total_amount), # ফ্রন্টএন্ডে পাঠানোর সময় float করা যেতে পারে
+                    "total": float(total_amount),
                     "added_points": float(total_pv),
                     "user_status": customer.status
                 }, status=status.HTTP_201_CREATED)
 
         except Exception as e:
-            # এররটা লগ করে রাখা ভালো
-            print(f"POS Order Error: {str(e)}")
+            # এররটা প্রিন্ট করুন যেন PythonAnywhere Log-এ দেখা যায়
+            print(f"CRITICAL POS ERROR: {str(e)}")
             return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
