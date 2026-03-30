@@ -2,18 +2,18 @@ from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status, permissions
 from django.db import transaction
-from django.db.models import F
-from accounts.services import distribute_money_to_funds
+from django.db.models import F, Q
+from rest_framework_simplejwt.authentication import JWTAuthentication
+from django.contrib.auth import get_user_model
+
 from products.models import Product
 from orders.models import Order, OrderItem
+from accounts.services import distribute_money_to_funds
 from .serializers import POSProductSerializer, POSCustomerSerializer
-from django.contrib.auth import get_user_model
-from django.db.models import Q
-from rest_framework_simplejwt.authentication import JWTAuthentication
 
 User = get_user_model()
 
-# ১. প্রোডাক্ট সার্চ (নাম বা আইডি দিয়ে)
+# ১. প্রোডাক্ট সার্চ (বারকোড নম্বর, নাম বা আইডি দিয়ে)
 class POSProductSearch(APIView):
     authentication_classes = [JWTAuthentication]
     permission_classes = [permissions.IsAdminUser]
@@ -21,8 +21,11 @@ class POSProductSearch(APIView):
     def get(self, request):
         query = request.query_params.get('q', '').strip()
         if query:
+            # ✅ এখানে 'barcode' এর বদলে 'barcode_number' ব্যবহার করা হয়েছে
             products = Product.objects.filter(
-                Q(name__icontains=query) | Q(id__icontains=query)
+                Q(barcode_number=query) | 
+                Q(name__icontains=query) | 
+                Q(id__icontains=query)
             ).filter(is_active=True)[:10]
         else:
             products = Product.objects.none()
@@ -43,23 +46,7 @@ class POSCustomerSearch(APIView):
         serializer = POSCustomerSerializer(customers, many=True)
         return Response(serializer.data)
 
-# ৩. অর্ডার তৈরি লজিক (দাম সবসময় ফুল থাকবে)
-from rest_framework.views import APIView
-from rest_framework.response import Response
-from rest_framework import status, permissions
-from django.db import transaction
-from django.db.models import F
-from accounts.services import distribute_money_to_funds
-from products.models import Product
-from orders.models import Order, OrderItem
-from .serializers import POSProductSerializer, POSCustomerSerializer
-from django.contrib.auth import get_user_model
-from django.db.models import Q
-from rest_framework_simplejwt.authentication import JWTAuthentication
-
-User = get_user_model()
-
-# ৩. অর্ডার তৈরি লজিক (সংশোধিত)
+# ৩. অর্ডার তৈরি লজিক (মেম্বার ডিসকাউন্ট এবং পয়েন্ট ডিস্ট্রিবিউশন)
 class POSOrderCreate(APIView):
     authentication_classes = [JWTAuthentication]
     permission_classes = [permissions.IsAdminUser]
@@ -99,13 +86,11 @@ class POSOrderCreate(APIView):
                     original_price = float(product.price)
                     pv_unit = float(product.point_value or 0)
                     
-                    # ✅ ১ পয়েন্ট = ২ টাকা ডিসকাউন্ট লজিক ইমপ্লিমেন্টেশন
+                    # ✅ ডিসকাউন্ট লজিক: ১ পয়েন্ট = ২ টাকা অফ
                     if is_active:
-                        # একটিভ মেম্বার সরাসরি টাকা ডিসকাউন্ট পাবে (পয়েন্ট পাবে না)
                         final_price = original_price - (pv_unit * 2)
                         final_pv = 0
                     else:
-                        # ইন-একটিভ মেম্বার ফুল MRP দিবে এবং পয়েন্ট পাবে (অ্যাক্টিভ হওয়ার জন্য)
                         final_price = original_price
                         final_pv = pv_unit
 
@@ -132,7 +117,6 @@ class POSOrderCreate(APIView):
                     address="POS Counter Sale",
                     city="In-Store",
                     subtotal=total_amount,
-                    shipping_cost=0,
                     total_amount=total_amount,
                     total_pv=total_pv,
                     status='Completed',
@@ -150,13 +134,11 @@ class POSOrderCreate(APIView):
                         point_value=oi['point_value']
                     )
 
-                # ফান্ড এবং পয়েন্ট ডিস্ট্রিবিউশন
+                # ফান্ড এবং পয়েন্ট ডিস্ট্রিবিউশন
                 if total_pv > 0:
                     distribute_money_to_funds(total_pv)
-                    # ইউজারের পয়েন্ট আপডেট (শুধুমাত্র যারা একটিভ না তারা পাবে)
                     User.objects.filter(id=customer.id).update(points=F('points') + total_pv)
                     
-                    # অটো-অ্যাক্টিভেশন চেক
                     customer.refresh_from_db() 
                     if customer.points >= 1000 and customer.status != 'active':
                         customer.status = 'active'
