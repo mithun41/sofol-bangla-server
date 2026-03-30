@@ -27,18 +27,18 @@ class CategorySerializer(serializers.ModelSerializer):
 
 class ProductSerializer(serializers.ModelSerializer):
     category_name = serializers.ReadOnlyField(source='category.name')
-    
-    # অরিজিনাল প্রাইস যেটা ডাটাবেস থেকে সরাসরি আসবে (যাতে ডুপ্লিকেট না হয়)
     original_price = serializers.ReadOnlyField(source='price')
-    
-    # ডিসকাউন্ট এবং ডিসপ্লে প্রাইস ক্যালকুলেট করার জন্য আলাদা নাম ব্যবহার করা ভালো
     discount_price = serializers.SerializerMethodField()
     display_price = serializers.SerializerMethodField()
 
     class Meta:
         model = Product
-        # fields = '__all__' রাখলে ডাটাবেসের 'price' অটো চলে আসবে
-        fields = '__all__' 
+        fields = '__all__'
+        # ✅ নিচের এই লাইনটি যোগ করুন
+        extra_kwargs = {
+            'is_active': {'read_only': True},
+            'barcode_number': {'read_only': True}, # যেহেতু এটা অটো জেনারেট হয়
+        } 
 
     def get_discount_price(self, obj):
         """ইউজার একটিভ থাকলে ডিসকাউন্ট ক্যালকুলেট করা"""
