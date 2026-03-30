@@ -15,38 +15,8 @@ from .serializers import POSProductSerializer, POSCustomerSerializer
 User = get_user_model()
 
 # ১. প্রোডাক্ট সার্চ (বারকোড নম্বর, নাম বা আইডি দিয়ে)
-class POSProductSearch(APIView):
-    authentication_classes = [JWTAuthentication]
-    permission_classes = [permissions.IsAdminUser]
+from decimal import Decimal
 
-    def get(self, request):
-        query = request.query_params.get('q', '').strip()
-        if query:
-            products = Product.objects.filter(
-                Q(barcode_number=query) | 
-                Q(name__icontains=query) | 
-                Q(id__icontains=query)
-            ).filter(is_active=True)[:10]
-        else:
-            products = Product.objects.none()
-
-        serializer = POSProductSerializer(products, many=True)
-        return Response(serializer.data)
-
-# ২. কাস্টমার সার্চ (ইউজারনেম বা ফোন দিয়ে)
-class POSCustomerSearch(APIView):
-    authentication_classes = [JWTAuthentication]
-    permission_classes = [permissions.IsAdminUser]
-
-    def get(self, request):
-        query = request.query_params.get('q', '')
-        customers = User.objects.filter(
-            Q(username__icontains=query) | Q(phone__icontains=query)
-        )[:5]
-        serializer = POSCustomerSerializer(customers, many=True)
-        return Response(serializer.data)
-
-# ৩. অর্ডার তৈরি লজিক (নিখুঁত ডেসিমাল ক্যালকুলেশনসহ)
 class POSOrderCreate(APIView):
     authentication_classes = [JWTAuthentication]
     permission_classes = [permissions.IsAdminUser]
@@ -56,47 +26,47 @@ class POSOrderCreate(APIView):
         customer_id = data.get('customer_id')
         items = data.get('items', [])
 
-        if not customer_id:
-            return Response({"error": "অনুগ্রহ করে একজন কাস্টমার সিলেক্ট করুন।"}, status=400)
+        # ১. বেসিক ভ্যালিডেশন
+        if not customer_id or not items:
+            return Response({"error": "কাস্টমার বা আইটেম মিসিং!"}, status=400)
 
         customer = User.objects.filter(id=customer_id).first()
         if not customer:
-            return Response({"error": "কাস্টমার খুঁজে পাওয়া যায়নি!"}, status=404)
-
-        if not items:
-            return Response({"error": "কার্ট খালি!"}, status=400)
+            return Response({"error": "কাস্টমার পাওয়া যায়নি!"}, status=404)
 
         try:
             with transaction.atomic():
-                raw_status = getattr(customer, 'status', 'inactive')
-                is_active = (str(raw_status).lower().strip() == 'active')
+                # মেম্বার স্ট্যাটাস চেক
+                is_active = (str(getattr(customer, 'status', '')).lower().strip() == 'active')
 
-                # ✅ ফ্লোটের বদলে ডেসিমাল ইনিশিয়ালাইজ করা হয়েছে
                 total_amount = Decimal('0.00')
                 total_pv = Decimal('0.00')
                 order_items_data = []
 
                 for item in items:
                     product = Product.objects.select_for_update().get(id=item['product_id'])
-                    qty = Decimal(str(item['quantity'])) # কোয়ান্টিটিও ডেসিমাল
-
-                    if product.stock < qty:
-                        raise Exception(f"{product.name} আউট অফ স্টক! আছে: {product.stock}")
-
-                    # ✅ ক্যালকুলেশনে ডেসিমাল ব্যবহার
-                    original_price = product.price # অলরেডি ডেসিমাল
-                    pv_unit = Decimal(str(product.point_value or 0))
-                    discount_rate = Decimal('2.00')
                     
+                    # ✅ সেফ কনভারশন: সব কিছুকে Decimal(str()) করে নেওয়া
+                    qty = Decimal(str(item.get('quantity', 1)))
+                    
+                    if product.stock < qty:
+                        raise Exception(f"{product.name} আউট অফ স্টক!")
+
+                    # ডাটাবেস থেকে আসা ভ্যালুগুলোকেও স্ট্রিং করে ডেসিমাল করা
+                    original_price = Decimal(str(product.price))
+                    pv_unit = Decimal(str(product.point_value or '0.00'))
+                    discount_multiplier = Decimal('2.00')
+
                     if is_active:
-                        # মেম্বার হলে ডিসকাউন্ট পাবে, কিন্তু পয়েন্ট পাবে না
-                        final_price = original_price - (pv_unit * discount_rate)
+                        # একটিভ মেম্বার: ডিসকাউন্ট পাবে, পয়েন্ট ০
+                        final_price = original_price - (pv_unit * discount_multiplier)
                         final_pv = Decimal('0.00')
                     else:
-                        # মেম্বার না হলে ফুল প্রাইস, এবং পয়েন্ট পাবে
+                        # ইন-একটিভ: ফুল প্রাইস, পয়েন্ট পাবে
                         final_price = original_price
                         final_pv = pv_unit
 
+                    # আইটেম টোটাল ক্যালকুলেশন
                     total_amount += (final_price * qty)
                     total_pv += (final_pv * qty)
 
@@ -112,13 +82,12 @@ class POSOrderCreate(APIView):
                         'point_value': final_pv
                     })
 
-                # মেইন অর্ডার তৈরি
+                # ২. অর্ডার অবজেক্ট তৈরি
                 order = Order.objects.create(
                     user=customer,
                     name=customer.username,
                     phone=getattr(customer, 'phone', ""),
                     address="POS Counter Sale",
-                    city="In-Store",
                     subtotal=total_amount,
                     total_amount=total_amount,
                     total_pv=total_pv,
@@ -126,7 +95,7 @@ class POSOrderCreate(APIView):
                     payment_method=data.get('payment_method', 'Cash')
                 )
 
-                # আইটেমগুলো সেভ করা
+                # ৩. অর্ডার আইটেম তৈরি
                 for oi in order_items_data:
                     OrderItem.objects.create(
                         order=order,
@@ -137,25 +106,32 @@ class POSOrderCreate(APIView):
                         point_value=oi['point_value']
                     )
 
-                # ফান্ড এবং পয়েন্ট ডিস্ট্রিবিউশন
-                if total_pv > 0:
-                    distribute_money_to_funds(float(total_pv)) # এখানে float লাগতে পারে যদি ফাংশনটি ওভাবে লেখা হয়
+                # ৪. ফান্ড ডিস্ট্রিবিউশন এবং পয়েন্ট আপডেট
+                if total_pv > Decimal('0.00'):
+                    # ✅ এখানে ট্রিক: ফান্ড ডিস্ট্রিবিউশন ফাংশন যদি float চায় তবে float(total_pv) পাঠান
+                    try:
+                        distribute_money_to_funds(float(total_pv))
+                    except:
+                        pass # যদি ফান্ড ফাংশনে সমস্যা হয় তবে অর্ডার যেন আটকে না যায়
+                    
+                    # পয়েন্ট আপডেট (Decimal compatibility fixed)
                     User.objects.filter(id=customer.id).update(points=F('points') + total_pv)
                     
-                    customer.refresh_from_db() 
-                    if customer.points >= 1000 and customer.status != 'active':
+                    # কাস্টমার স্ট্যাটাস চেক (নতুন পয়েন্ট রিফ্রেশ করে)
+                    customer.refresh_from_db()
+                    if Decimal(str(customer.points)) >= Decimal('1000.00') and customer.status != 'active':
                         customer.status = 'active'
                         customer.save()
 
                 return Response({
                     "success": True,
                     "order_id": order.id,
-                    "total": float(total_amount),
-                    "added_points": float(total_pv),
+                    "total": float(total_amount), # ফ্রন্টএন্ডের জন্য float সেফ
                     "user_status": customer.status
-                }, status=status.HTTP_201_CREATED)
+                }, status=201)
 
         except Exception as e:
-            # প্রিন্ট করে রাখলাম যাতে কনসোলে দেখা যায় আসল ঝামেলা কি
-            print(f"POS Order Error: {str(e)}") 
-            return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
+            # আসল এরর মেসেজটা প্রিন্ট করুন যাতে লগে দেখা যায়
+            import traceback
+            print(traceback.format_exc()) 
+            return Response({"error": str(e)}, status=400)
