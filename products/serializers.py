@@ -1,13 +1,15 @@
+from decimal import Decimal
+
 from rest_framework import serializers
 from .models import Banner, Category, Product, Cart
 
 class CategorySerializer(serializers.ModelSerializer):
     # ইমেজ ফিল্ডটি আগের মতোই থাকল
     image = serializers.ImageField(required=False, allow_null=True)
-    
+
     # সাব-ক্যাটাগরির লিস্ট দেখানোর জন্য (Read Only)
     subcategories = serializers.SerializerMethodField()
-    
+
     # প্যারেন্ট ক্যাটাগরির নাম দেখানোর জন্য (ঐচ্ছিক, ফ্রন্টএন্ডে সুবিধা হবে)
     parent_name = serializers.ReadOnlyField(source='parent.name')
 
@@ -25,39 +27,63 @@ class CategorySerializer(serializers.ModelSerializer):
         )
         return serializer.data
 
+
 class ProductSerializer(serializers.ModelSerializer):
-    category_name = serializers.ReadOnlyField(source='category.name')
-    original_price = serializers.ReadOnlyField(source='price')
+    category_name = serializers.ReadOnlyField(source="category.name")
+    unit_display = serializers.CharField(source="get_unit_type_display", read_only=True)
+
+    # আগের ফরম্যাটের ক্যালকুলেটেড ফিল্ডস
+    original_price = serializers.ReadOnlyField(source="price")
     discount_price = serializers.SerializerMethodField()
     display_price = serializers.SerializerMethodField()
 
     class Meta:
         model = Product
-        fields = '__all__'
-        # ✅ নিচের এই লাইনটি যোগ করুন
+        fields = [
+            "id",
+            "category",
+            "category_name",
+            "name",
+            "slug",
+            "description",
+            "purchase_price",  # আগের ফিল্ড ফিরিয়ে আনা হলো
+            "price",
+            "unit_type",
+            "unit_display",
+            "stock",
+            "point_value",
+            "image",
+            "barcode_number",
+            "barcode_image",
+            "is_active",
+            "is_featured",  # আগের ফিল্ড ফিরিয়ে আনা হলো
+            "original_price",
+            "discount_price",
+            "display_price",
+            "created_at",
+        ]
         extra_kwargs = {
-            'is_active': {'read_only': True},
-            'barcode_number': {'read_only': True}, # যেহেতু এটা অটো জেনারেট হয়
-        } 
+            "is_active": {"read_only": True},
+            "barcode_number": {"read_only": True},
+            "barcode_image": {"read_only": True},
+        }
 
     def get_discount_price(self, obj):
-        """ইউজার একটিভ থাকলে ডিসকাউন্ট ক্যালকুলেট করা"""
-        request = self.context.get('request')
+        """ইউজার একটিভ থাকলে ডিসকাউন্ট ক্যালকুলেট করা (Price - PV*2)"""
+        request = self.context.get("request")
         try:
-            # এখানে সরাসরি float না করে Decimal ব্যবহার করা সেফ, তবে তোর আগের লজিক অনুযায়ী float রাখা হলো
-            base_price = float(obj.price)
-            pv = float(obj.point_value or 0)
+            base_price = Decimal(str(obj.price))
+            pv = Decimal(str(obj.point_value or 0))
 
             if request and request.user.is_authenticated:
-                u_status = getattr(request.user, 'status', '').lower()
-                
-                # যদি ইউজার একটিভ থাকে এবং অ্যাডমিন/স্টাফ না হয় তবেই ডিসকাউন্ট
-                if u_status == 'active' and not request.user.is_staff:
-                    # তোর লজিক: প্রাইস - (পয়েন্ট * ২)
-                    return round(base_price - (pv * 2), 2)
-        except (ValueError, TypeError):
+                u_status = getattr(request.user, "status", "").lower().strip()
+
+                # একটিভ ইউজার হলে (কিন্তু অ্যাডমিন না হলে) ডিসকাউন্ট পাবে
+                if u_status == "active" and not request.user.is_staff:
+                    discounted = base_price - (pv * Decimal("2.0"))
+                    return float(round(discounted, 2))
+        except (ValueError, TypeError, Exception):
             pass
-        
         return None
 
     def get_display_price(self, obj):
@@ -67,17 +93,20 @@ class ProductSerializer(serializers.ModelSerializer):
 
     def validate(self, data):
         """
-        অ্যাডমিন প্যানেল থেকে ডাটা সেভ করার সময় ভ্যালিডেশন।
-        একই মেথড একবার লিখলেই যথেষ্ট।
+        স্টক যেন পজিটিভ থাকে তা নিশ্চিত করা এবং ইনপুট ভ্যালিডেশন।
         """
-        request = self.context.get('request')
-        if request and request.method in ['POST', 'PUT', 'PATCH']:
-            # ইনপুট থেকে সরাসরি ভ্যালু নিয়ে ডাটাতে সেট করা
-            if 'price' in request.data:
-                data['price'] = request.data['price']
-            if 'point_value' in request.data:
-                data['point_value'] = request.data['point_value']
+        # আপডেট বা ক্রিয়েট করার সময় স্টক চেক
+        stock_val = data.get("stock", 0)
+        try:
+            if float(stock_val) < 0:
+                raise serializers.ValidationError(
+                    {"stock": "মামা, স্টক তো নেগেটিভ হইতে পারে না!"}
+                )
+        except (ValueError, TypeError):
+            pass
+
         return data
+
 
 class CartSerializer(serializers.ModelSerializer):
     product_name = serializers.ReadOnlyField(source='product.name')

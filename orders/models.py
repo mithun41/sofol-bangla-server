@@ -1,3 +1,4 @@
+from decimal import Decimal
 import string
 import random
 from django.db import models, transaction
@@ -61,36 +62,38 @@ class Order(models.Model):
 
         super().save(*args, **kwargs)
 
-        # স্টক রিস্টোর (Cancelled হলে)
+        # স্টক রিস্টোর লজিক (Cancelled হলে) - কেজি/গ্রাম সাপোর্টসহ
         if old_status and old_status != "Cancelled" and self.status == "Cancelled":
             from products.models import Product
 
             with transaction.atomic():
                 for item in self.items.all():
-                    Product.objects.filter(id=item.product_id).update(
-                        stock=models.F("stock") + item.quantity
+                    product = (
+                        Product.objects.select_for_update()
+                        .filter(id=item.product_id)
+                        .first()
                     )
+                    if product:
+                        qty = Decimal(str(item.quantity))
+                        if product.unit_type == "gram":
+                            product.stock += qty / Decimal("1000.0")
+                        else:
+                            product.stock += qty
+                        product.save()
 
-        # বেনিফিট ডিস্ট্রিবিউশন লজিক
+        # বেনিফিট ডিস্ট্রিবিউশন (Completed হলে)
         if self.status == "Completed" and not self.points_awarded:
             with transaction.atomic():
-                # ডাটাবেজ থেকে লেটেস্ট অবজেক্ট লক করে আনা
                 order_to_process = Order.objects.select_for_update().get(pk=self.pk)
-
                 if not order_to_process.points_awarded:
                     from accounts.services import calculate_and_apply_order_benefits
 
-                    # আগে ফ্ল্যাগ আপডেট যাতে ডাবল বোনাস না যায়
                     Order.objects.filter(pk=self.pk).update(points_awarded=True)
                     self.points_awarded = True
-
                     success = calculate_and_apply_order_benefits(self)
-
                     if not success:
                         Order.objects.filter(pk=self.pk).update(points_awarded=False)
                         self.points_awarded = False
-                    elif self.user:
-                        self.user.refresh_from_db()
 
     def __str__(self):
         return f"{self.order_number} - {self.name}"
@@ -100,9 +103,31 @@ class OrderItem(models.Model):
     order = models.ForeignKey(Order, related_name="items", on_delete=models.CASCADE)
     product_id = models.IntegerField()
     product_name = models.CharField(max_length=255)
-    quantity = models.IntegerField()
+    quantity = models.DecimalField(max_digits=10, decimal_places=3)
     price = models.DecimalField(max_digits=10, decimal_places=2)
+    # ✅ এই যে মামা, তোর point_value ফিল্ডটা আবার যোগ করে দিলাম
     point_value = models.IntegerField(default=0)
+
+    def save(self, *args, **kwargs):
+        is_new = self.pk is None
+        super().save(*args, **kwargs)
+
+        if is_new:
+            from products.models import Product
+
+            with transaction.atomic():
+                product = (
+                    Product.objects.select_for_update()
+                    .filter(id=self.product_id)
+                    .first()
+                )
+                if product:
+                    qty = Decimal(str(self.quantity))
+                    if product.unit_type == "gram":
+                        product.stock -= qty / Decimal("1000.0")
+                    else:
+                        product.stock -= qty
+                    product.save()
 
     def __str__(self):
         return f"{self.product_name} (x{self.quantity})"
