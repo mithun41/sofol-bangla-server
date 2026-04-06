@@ -20,117 +20,178 @@ class MyTokenObtainPairSerializer(TokenObtainPairSerializer):
         user = self.user
 
         # ড্যাশবোর্ডের জন্য ইউজার ডাটা আপডেট
-        data.update({
-            'username': user.username,
-            'role': user.role,
-            'name': user.name,
-            'profile_picture': user.profile_picture.url if user.profile_picture else None,
-            'email': user.email,
-            'phone': user.phone,
-            
-            # --- মেইন ব্যালেন্স ও পয়েন্ট ---
-            'balance': float(user.balance),
-            'points': user.points,
-            
-            # --- ইউজারের ব্যক্তিগত বোনাস ফান্ড (User Dashboard Funds) ---
-            'referral_bonus': float(getattr(user, 'referral_bonus', 0)),
-            'matching_bonus': float(getattr(user, 'matching_bonus', 0)),
-            'leadership_bonus': float(getattr(user, 'leadership_bonus', 0)),
-            'rank_reward_bonus': float(getattr(user, 'rank_reward_bonus', 0)),
-            
-            # --- নেটওয়ার্ক স্ট্যাটাস ---
-            'left_count': user.left_count,
-            'right_count': user.right_count,
-            'total_left': user.total_left,
-            'total_right': user.total_right,
-            'reff_id': user.reff_id,
-            'placement_id': user.placement_id,
-            'status': user.status,
-            'star_level': user.star_level,
-        })
+        data.update(
+            {
+                "username": user.username,
+                "role": user.role,
+                "name": user.name,
+                "profile_picture": (
+                    user.profile_picture.url if user.profile_picture else None
+                ),
+                "email": user.email,
+                "phone": user.phone,
+                # --- মেইন ব্যালেন্স ও পয়েন্ট ---
+                "balance": float(user.balance),
+                "points": user.points,
+                # --- ইউজারের ব্যক্তিগত বোনাস ফান্ড (User Dashboard Funds) ---
+                "referral_bonus": float(getattr(user, "referral_bonus", 0)),
+                "matching_bonus": float(getattr(user, "matching_bonus", 0)),
+                "leadership_bonus": float(getattr(user, "leadership_bonus", 0)),
+                "rank_reward_bonus": float(getattr(user, "rank_reward_bonus", 0)),
+                # --- নেটওয়ার্ক স্ট্যাটাস ---
+                "left_count": user.left_count,
+                "right_count": user.right_count,
+                "total_left": user.total_left,
+                "total_right": user.total_right,
+                "reff_id": user.reff_id,
+                "placement_id": user.placement_id,
+                "status": user.status,
+                "star_level": user.star_level,
+            }
+        )
         return data
+
 
 # ২. ইউজার প্রোফাইল দেখার বা আপডেট করার সিরিয়ালাইজার
 # ১. ইউজার প্রোফাইল দেখার জন্য
 class UserProfileSerializer(serializers.ModelSerializer):
     # ইমেজ বা ফাইল ফিল্ডের ফুল ইউআরএল পাওয়ার জন্য SerializerMethodField ব্যবহার করা ভালো
     profile_picture = serializers.SerializerMethodField()
-    
-    total_offer_earned = serializers.DecimalField(max_digits=12, decimal_places=2, read_only=True)
-    lifetime_offer_points = serializers.DecimalField(max_digits=12, decimal_places=2, read_only=True)
+
+    total_offer_earned = serializers.DecimalField(
+        max_digits=12, decimal_places=2, read_only=True
+    )
+    lifetime_offer_points = serializers.DecimalField(
+        max_digits=12, decimal_places=2, read_only=True
+    )
 
     class Meta:
         model = User
         fields = [
-            'name', 'username', 'email', 'phone', 'role', 
-            'profile_picture', 'balance', 'points', 'left_count', 
-            'right_count', 'total_left', 'total_right', 'reff_id', 
-            'placement_id', 'status', 'star_level',
-            'referral_bonus', 'matching_bonus', 
-            'leadership_bonus', 'rank_reward_bonus', 'total_offer_earned', 'lifetime_offer_points',
+            "name",
+            "username",
+            "email",
+            "phone",
+            "role",
+            "profile_picture",
+            "balance",
+            "points",
+            "left_count",
+            "right_count",
+            "total_left",
+            "total_right",
+            "reff_id",
+            "placement_id",
+            "status",
+            "star_level",
+            "referral_bonus",
+            "matching_bonus",
+            "leadership_bonus",
+            "rank_reward_bonus",
+            "total_offer_earned",
+            "lifetime_offer_points",
         ]
         read_only_fields = [
-            'username', 'email', 'balance', 'points', 'reff_id', 
-            'placement_id', 'role', 'status', 'star_level',
-            'referral_bonus', 'matching_bonus', 'leadership_bonus', 'rank_reward_bonus'
+            "username",
+            "email",
+            "balance",
+            "points",
+            "reff_id",
+            "placement_id",
+            "role",
+            "status",
+            "star_level",
+            "referral_bonus",
+            "matching_bonus",
+            "leadership_bonus",
+            "rank_reward_bonus",
         ]
 
     # প্রোফাইল পিকচারের ফুল ইউআরএল জেনারেট করার ফাংশন
     def get_profile_picture(self, obj):
         if obj.profile_picture:
-            request = self.context.get('request')
+            request = self.context.get("request")
             if request is not None:
                 # এটি অটোমেটিক https://mithun41.pythonanywhere.com যোগ করে দেবে
                 return request.build_absolute_uri(obj.profile_picture.url)
             # যদি রিকোয়েস্ট না থাকে তবে শুধু পাথ রিটার্ন করবে
             return obj.profile_picture.url
         return None
-    
+
+
 # ২. অ্যাডমিন প্যানেলে সব ইউজার লিস্ট দেখার জন্য
 class UserListSerializer(serializers.ModelSerializer):
-    reff_id_input = serializers.CharField(write_only=True, required=False, allow_blank=True)
-    placement_id_input = serializers.CharField(write_only=True, required=False, allow_blank=True)
-    referred_by_username = serializers.ReadOnlyField(source='referred_by.username')
-    placement_under_username = serializers.ReadOnlyField(source='placement_under.username')
+    reff_id_input = serializers.CharField(
+        write_only=True, required=False, allow_blank=True
+    )
+    placement_id_input = serializers.CharField(
+        write_only=True, required=False, allow_blank=True
+    )
+    referred_by_username = serializers.ReadOnlyField(source="referred_by.username")
+    placement_under_username = serializers.ReadOnlyField(
+        source="placement_under.username"
+    )
 
     class Meta:
         model = User
         fields = (
-            'id','name', 'username', 'email', 'phone', 'reff_id', 'placement_id', 
-            'points', 'balance', 'position', 'left_count', 'right_count',
-            'referred_by_username', 'placement_under_username', 
-            'reff_id_input', 'placement_id_input',
-            'status', 'star_level', 'role', 'createdAt', 'division',
+            "id",
+            "name",
+            "username",
+            "email",
+            "phone",
+            "reff_id",
+            "placement_id",
+            "points",
+            "balance",
+            "position",
+            "left_count",
+            "right_count",
+            "referred_by_username",
+            "placement_under_username",
+            "reff_id_input",
+            "placement_id_input",
+            "status",
+            "star_level",
+            "role",
+            "createdAt",
+            "division",
             # অ্যাডমিন যেন সবার বোনাস দেখতে পারে
-            'referral_bonus', 'matching_bonus', 'leadership_bonus', 'rank_reward_bonus'
+            "referral_bonus",
+            "matching_bonus",
+            "leadership_bonus",
+            "rank_reward_bonus",
         )
+
 
 # ৩. প্রোফাইল আপডেট করার জন্য (আগের মতোই থাকবে)
 class UserProfileUpdateSerializer(serializers.ModelSerializer):
     class Meta:
         model = User
-        fields = ['name', 'email', 'phone', 'profile_picture', 'password']
+        fields = ["name", "email", "phone", "profile_picture", "password"]
         extra_kwargs = {
-            'password': {'write_only': True, 'required': False},
-            'email': {'required': False},
-            'phone': {'required': False},
+            "password": {"write_only": True, "required": False},
+            "email": {"required": False},
+            "phone": {"required": False},
         }
 
     def update(self, instance, validated_data):
-        password = validated_data.pop('password', None)
+        password = validated_data.pop("password", None)
         if password:
             instance.set_password(password)
-        
+
         for attr, value in validated_data.items():
             setattr(instance, attr, value)
-            
+
         instance.save()
         return instance
 
 
 class RegisterSerializer(serializers.ModelSerializer):
     name = serializers.CharField(required=True)
-    username = serializers.CharField(validators=[UniqueValidator(queryset=User.objects.all())])
+    username = serializers.CharField(
+        validators=[UniqueValidator(queryset=User.objects.all())]
+    )
     phone = serializers.CharField(required=True)
     reff_code_input = serializers.CharField(write_only=True, required=False, allow_blank=True)
     placement_id_input = serializers.CharField(write_only=True, required=False, allow_blank=True)
@@ -138,59 +199,98 @@ class RegisterSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = User
-        fields = ('name', 'username', 'password', 'email', 'phone', 'division', 'reff_code_input', 'placement_id_input', 'position_input')
-        extra_kwargs = {'password': {'write_only': True}}
+        fields = (
+            "name", "username", "password", "email", "phone", 
+            "division", "reff_code_input", "placement_id_input", "position_input",
+        )
+        extra_kwargs = {"password": {"write_only": True}}
 
     def create(self, validated_data):
-        reff_code = validated_data.pop('reff_code_input', None)
-        placement_code = validated_data.pop('placement_id_input', None)
-        pos_input = validated_data.pop('position_input', None)
+        # ১. ইনপুট ডাটাগুলো আলাদা করা
+        reff_code = validated_data.pop("reff_code_input", None)
+        placement_code = validated_data.pop("placement_id_input", None)
+        pos_input = validated_data.pop("position_input", None)
         
-        user = User.objects.create_user(**validated_data)
+        # ২. ইউজারনেমকে আইডি হিসেবে সেট করা (যাতে ইউনিক এরর না আসে)
+        username = validated_data.get('username')
+        validated_data['reff_id'] = username
+        validated_data['placement_id'] = username
 
+        # ৩. ইউজার অবজেক্ট তৈরি (এখুনি সেভ হবে না)
+        password = validated_data.pop('password')
+        user = User(**validated_data)
+        user.set_password(password)
+
+        # ৪. রেফারেল লজিক
         if reff_code:
             user.referred_by = User.objects.filter(reff_id=reff_code).first()
 
+        # ৫. প্লেসমেন্ট লজিক
         if placement_code:
             placer = User.objects.filter(placement_id=placement_code).first()
             if placer:
                 user.placement_under = placer
-                user.position = pos_input if pos_input in ['left', 'right'] else ('left' if not User.objects.filter(placement_under=placer, position='left').exists() else 'right')
+                # পজিশন চেক
+                if pos_input in ["left", "right"]:
+                    user.position = pos_input
+                else:
+                    # অটো পজিশন বাম বা ডানে
+                    left_exists = User.objects.filter(placement_under=placer, position="left").exists()
+                    user.position = "right" if left_exists else "left"
+        
+        # ৬. যদি প্লেসমেন্ট কোড না থাকে কিন্তু রেফারার থাকে (অটো প্লেসমেন্ট)
         elif user.referred_by:
-            from .utils import find_auto_placement_with_division
-            parent, pos = find_auto_placement_with_division(user.referred_by, validated_data.get('division', ''))
-            user.placement_under, user.position = parent, pos
+            from .services import find_auto_placement_with_division
+            parent, pos = find_auto_placement_with_division(user.referred_by, validated_data.get("division", ""))
+            user.placement_under = parent
+            user.position = pos
 
+        # ৭. ফাইনাল সেভ (এখানে মডেলের save() কল হবে এবং একটিভেশন লজিক কাজ করবে)
         user.save()
         return user
 
+    # এই ভ্যালিডেশনটা আপাতত দরকার নাই কারণ আমরা ইনপুটটাকে placement_id হিসেবে সেভ করছি না
+    # বরং ইউজারনেমকে করছি। তবে ইনপুটের জন্য চাইলে রাখতে পারিস।
+
+
 class BonusLogSerializer(serializers.ModelSerializer):
-    user_username = serializers.ReadOnlyField(source='user.username')
+    user_username = serializers.ReadOnlyField(source="user.username")
+
     class Meta:
         model = BonusLog
-        fields = ['id', 'user_username', 'amount', 'reason', 'timestamp']
+        fields = ["id", "user_username", "amount", "reason", "timestamp"]
+
 
 class WithdrawalSerializer(serializers.ModelSerializer):
     username = serializers.CharField(source="user.username", read_only=True)
+
     class Meta:
         model = WithdrawalRequest
-        fields = ['id', 'amount','username', 'method', 'account_number', 'status', 'created_at']
-        read_only_fields = ['status', 'created_at']
-        
+        fields = [
+            "id",
+            "amount",
+            "username",
+            "method",
+            "account_number",
+            "status",
+            "created_at",
+        ]
+        read_only_fields = ["status", "created_at"]
+
 
 # ১. ফান্ডে টাকা জমানোর লজিক (১০০০ পয়েন্ট = ৪০০০ টাকা হিসেবে)
 def distribute_money_to_funds(points):
     total_money = Decimal(points) * 4
     fund, created = GlobalFund.objects.get_or_create(id=1)
-    
+
     # তোর দেওয়া ক্যালকুলেশন অনুযায়ী পারসেন্টেজ
     distributions = {
-        'referral_fund': total_money * Decimal('0.125'),  # ১২.৫%
-        'matching_fund': total_money * Decimal('0.10'),   # ১০%
-        'rank_reward_fund': total_money * Decimal('0.125'),# ১২.৫%
-        'tour_fund': total_money * Decimal('0.25'),       # ২৫%
-        'leadership_fund': total_money * Decimal('0.125'), # ১২.৫%
-        'company_fund': total_money * Decimal('0.275'),    # ২৭.৫%
+        "referral_fund": total_money * Decimal("0.125"),  # ১২.৫%
+        "matching_fund": total_money * Decimal("0.10"),  # ১০%
+        "rank_reward_fund": total_money * Decimal("0.125"),  # ১২.৫%
+        "tour_fund": total_money * Decimal("0.25"),  # ২৫%
+        "leadership_fund": total_money * Decimal("0.125"),  # ১২.৫%
+        "company_fund": total_money * Decimal("0.275"),  # ২৭.৫%
     }
 
     with transaction.atomic():
@@ -198,41 +298,55 @@ def distribute_money_to_funds(points):
             current_val = getattr(fund, field)
             setattr(fund, field, current_val + amount)
             FundLog.objects.create(
-                fund_type=field, amount=amount, 
-                transaction_type='inbound', reason=f"Distribution from {points} points"
+                fund_type=field,
+                amount=amount,
+                transaction_type="inbound",
+                reason=f"Distribution from {points} points",
             )
         fund.save()
+
 
 # ২. ফান্ড থেকে টাকা কাটানোর লজিক (ব্যাকআপ হিসেবে কোম্পানি ফান্ডসহ)
 def deduct_from_fund(primary_fund_name, amount):
     fund, created = GlobalFund.objects.get_or_create(id=1)
     primary_balance = getattr(fund, primary_fund_name)
     company_balance = fund.company_fund
-    
+
     amount = Decimal(amount)
 
     with transaction.atomic():
         if primary_balance >= amount:
             # যদি মেইন ফান্ডে টাকা থাকে
             setattr(fund, primary_fund_name, primary_balance - amount)
-            FundLog.objects.create(fund_type=primary_fund_name, amount=amount, transaction_type='outbound', reason="Bonus distribution")
+            FundLog.objects.create(
+                fund_type=primary_fund_name,
+                amount=amount,
+                transaction_type="outbound",
+                reason="Bonus distribution",
+            )
         elif (primary_balance + company_balance) >= amount:
             # যদি মেইন ফান্ড + কোম্পানি ফান্ড মিলায়া হয়
             remaining = amount - primary_balance
             setattr(fund, primary_fund_name, 0)
             fund.company_fund -= remaining
-            FundLog.objects.create(fund_type=primary_fund_name, amount=primary_balance, transaction_type='outbound', reason="Partial bonus")
-            FundLog.objects.create(fund_type='company_fund', amount=remaining, transaction_type='outbound', reason="Bonus backup support")
+            FundLog.objects.create(
+                fund_type=primary_fund_name,
+                amount=primary_balance,
+                transaction_type="outbound",
+                reason="Partial bonus",
+            )
+            FundLog.objects.create(
+                fund_type="company_fund",
+                amount=remaining,
+                transaction_type="outbound",
+                reason="Bonus backup support",
+            )
         else:
             # টাকা নাই!
-            return False 
-        
+            return False
+
         fund.save()
         return True
-    
-
-
-
 
 
 class ForgotPasswordSerializer(serializers.Serializer):
@@ -241,23 +355,27 @@ class ForgotPasswordSerializer(serializers.Serializer):
 
     def validate(self, data):
         # Specific user check
-        if not User.objects.filter(username=data['username'], phone=data['phone']).exists():
-            raise serializers.ValidationError("Account not found with provided username and phone.")
+        if not User.objects.filter(
+            username=data["username"], phone=data["phone"]
+        ).exists():
+            raise serializers.ValidationError(
+                "Account not found with provided username and phone."
+            )
         return data
 
     def generate_otp(self):
-        username = self.validated_data['username']
-        phone = self.validated_data['phone']
-        
+        username = self.validated_data["username"]
+        phone = self.validated_data["phone"]
+
         # Using .filter().first() to avoid MultipleObjectsReturned crash
         user = User.objects.filter(username=username, phone=phone).first()
-        
+
         if user:
             otp_code = str(random.randint(100000, 999999))
             user.otp = otp_code
             user.otp_expiry = timezone.now() + timedelta(minutes=5)
             user.save()
-            
+
             # Real SMS Sending
             self.send_greenweb_sms(phone, otp_code, username)
             return otp_code
@@ -265,7 +383,7 @@ class ForgotPasswordSerializer(serializers.Serializer):
 
     def send_greenweb_sms(self, phone, otp, username):
         token = "816302462035b3e9a8b7d749d660d03d3610af4c65"
-        to = phone if phone.startswith('88') else f"88{phone}"
+        to = phone if phone.startswith("88") else f"88{phone}"
         message = f"OTP for user {username} is {otp}. Valid for 5 mins."
 
         url = "http://api.greenweb.com.bd/api.php"
@@ -278,6 +396,7 @@ class ForgotPasswordSerializer(serializers.Serializer):
         except Exception as e:
             print(f"SMS Delivery Failed: {str(e)}")
 
+
 # 3. Reset Password Logic
 class ResetPasswordSerializer(serializers.Serializer):
     username = serializers.CharField(required=True)
@@ -287,30 +406,29 @@ class ResetPasswordSerializer(serializers.Serializer):
 
     def validate(self, data):
         user = User.objects.filter(
-            username=data['username'], 
-            phone=data['phone'], 
-            otp=data['otp']
+            username=data["username"], phone=data["phone"], otp=data["otp"]
         ).first()
 
         if not user:
             raise serializers.ValidationError("Invalid credentials or OTP.")
-        
+
         if user.otp_expiry and user.otp_expiry < timezone.now():
             raise serializers.ValidationError("OTP has expired. Please try again.")
-            
+
         return data
 
     def save(self):
-        username = self.validated_data['username']
-        phone = self.validated_data['phone']
+        username = self.validated_data["username"]
+        phone = self.validated_data["phone"]
         user = User.objects.get(username=username, phone=phone)
-        
-        user.set_password(self.validated_data['new_password'])
-        user.otp = None 
+
+        user.set_password(self.validated_data["new_password"])
+        user.otp = None
         user.otp_expiry = None
         user.save()
         return user
-    
+
+
 class VerifyOTPSerializer(serializers.Serializer):
     username = serializers.CharField(required=True)
     phone = serializers.CharField(required=True)
@@ -318,27 +436,26 @@ class VerifyOTPSerializer(serializers.Serializer):
 
     def validate(self, data):
         user = User.objects.filter(
-            username=data['username'], 
-            phone=data['phone'], 
-            otp=data['otp']
+            username=data["username"], phone=data["phone"], otp=data["otp"]
         ).first()
 
         if not user:
             raise serializers.ValidationError("Invalid credentials or OTP.")
-        
+
         if user.otp_expiry and user.otp_expiry < timezone.now():
             raise serializers.ValidationError("OTP has expired.")
-            
+
         return data
+
 
 class ResetPasswordFinalSerializer(serializers.Serializer):
     username = serializers.CharField(required=True)
     new_password = serializers.CharField(required=True, min_length=6)
 
     def save(self):
-        user = User.objects.get(username=self.validated_data['username'])
-        user.set_password(self.validated_data['new_password'])
-        user.otp = None 
+        user = User.objects.get(username=self.validated_data["username"])
+        user.set_password(self.validated_data["new_password"])
+        user.otp = None
         user.otp_expiry = None
         user.save()
         return user

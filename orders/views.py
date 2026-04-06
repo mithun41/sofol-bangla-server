@@ -27,6 +27,7 @@ class OrderCreateView(APIView):
     def post(self, request):
         data = request.data
         user = request.user
+        user.refresh_from_db()
         items_data = data.get('items', [])
 
         if not items_data:
@@ -46,13 +47,13 @@ class OrderCreateView(APIView):
                 for item in items_data:
                     product = Product.objects.select_for_update().get(id=item['product_id'])
                     qty = int(item['quantity'])
-                    
+
                     if product.stock < qty:
                         raise Exception(f"{product.name} এর পর্যাপ্ত স্টক নেই!")
 
                     base_price = Decimal(str(product.price))
                     unit_pv = int(product.point_value or 0)
-                    
+
                     if is_active_user:
                         # ৫ PV = ১০ টাকা ডিসকাউন্ট (PV * 2)
                         discount = Decimal(str(unit_pv * 2))
@@ -109,7 +110,7 @@ class OrderCreateView(APIView):
                     "order_id": order.id,
                     "payable_amount": float(calculated_subtotal)
                 }, status=status.HTTP_201_CREATED)
-    
+
         except Exception as e:
             print(f"DEBUG ERROR: {str(e)}") # এটি আপনার সার্ভার লগে দেখাবে
             return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
@@ -201,7 +202,7 @@ class UserDashboardReportView(APIView):
             "total_orders": total_orders,
             "month_name": now.strftime('%B')
         })
-        
+
 class AdminOrderAnalyticsView(APIView):
     permission_classes = [IsAdminUser]
 
@@ -250,7 +251,7 @@ class AdminOrderAnalyticsView(APIView):
             },
             "daily_stats": list(daily_stats) # list এ কনভার্ট করলে ফ্রন্টএন্ড সহজে পায়
         })
-        
+
 class OrderSalesAnalyticsView(APIView):
     permission_classes = [IsAdminUser]
 
