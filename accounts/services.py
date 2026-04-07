@@ -391,55 +391,73 @@ def calculate_commission(new_active_user):
 
 
 def calculate_and_apply_order_benefits(order):
-    """অর্ডার কমপ্লিট হলে পয়েন্ট এবং এক্টিভেশন লজিক চালায়"""
+    """Order complete hole point, activation ebong MLM bonus trigger korbe (Cashback chara)"""
     user = order.user
     if not user:
         return False
 
     order_pv_int = int(order.total_pv or 0)
-    order_pv_decimal = Decimal(str(order.total_pv or 0))
 
     with transaction.atomic():
-        # ইউজারকে লক করে আনা যাতে ডাবল এন্ট্রি না হয়
+        # User-ke lock kora jate race condition na hoy
         user = User.objects.select_for_update().get(pk=user.pk)
 
-        # পয়েন্ট যোগ করা
+        # ১. Point add kora (Inactive theke Active howar jonno)
         current_points = user.points or 0
         user.points = current_points + order_pv_int
 
-        # স্ট্যাটাস চেক (Case insensitive)
+        # ২. Status check (Case insensitive)
         current_status = str(user.status).strip().lower()
 
         if current_status == "active":
-            # --- একটিভ ইউজার: ২ গুণ ক্যাশব্যাক ---
-            offer_amount = order_pv_decimal * Decimal("2.0")
-            user.lifetime_offer_points += order_pv_decimal
-            user.total_offer_earned += offer_amount
-            user.balance += offer_amount
+            # --- Active User: Shudhu point update hobe, CASHBACK JABENA ---
             user.save()
+            print(f"DEBUG: {user.username} (Active) - Points updated, no cashback.")
 
-            BonusLog.objects.create(
-                user=user,
-                amount=offer_amount,
-                reason=f"Order Cashback for #{order.order_number}",
-            )
         else:
-            # --- ইন-একটিভ ইউজার: এক্টিভেশন চেক ---
+            # --- Inactive User: Activation logic ---
             if user.points >= 1000:
                 user.status = "active"
-                user.save()  # স্ট্যাটাস আগে সেভ
+                user.save()  # Age status active kore nite hobe
                 print(f"DEBUG: {user.username} is now ACTIVE!")
 
-                # কমিশন লজিক (Try-Except যাতে এরর আসলে রোলব্যাক না হয়)
+                # ৩. MLM Bonus Trigger (Referral, Matching, Rank, etc.)
                 try:
-                    # এখানে যদি তোর কমিশন ফাংশন থাকে তবে কল করবি
-                    # from .mlm_logic import calculate_commission
-                    # calculate_commission(user)
-                    pass
+                    from accounts.services import calculate_commission
+
+                    # Ekhon theke Reff, Matching, Rank bonus calculate hobe
+                    calculate_commission(user)
                 except Exception as e:
                     print(f"MLM/Commission Error: {e}")
             else:
-                user.save()  # শুধু পয়েন্ট আপডেট
+                user.save()  # 1000 point na howa porjonto shudhu point update hobe
 
     user.refresh_from_db()
     return True
+
+
+def apply_auto_referral(user_instance):
+    """
+    যদি ইউজার রেজিস্ট্রেশনের সময় কোনো রেফারার না থাকে,
+    তবে তার ডিক্লেয়ার করা division অনুযায়ী অটো রেফারার সেট করবে।
+    """
+    # ১. যদি অলরেডি রেফারার থাকে, তবে আর কিছু করার দরকার নেই
+    if user_instance.referred_by:
+        return user_instance
+
+    # ২. যদি রেফারার না থাকে, তবে তার বিভাগ অনুযায়ী ইউজার খুঁজবে
+    if user_instance.division:
+        # বিভাগের নাম অনুযায়ী ইউজারকে খুঁজবে (যেমন: 'dhaka' ইউজারনেম)
+        fallback_referrer = User.objects.filter(
+            username=user_instance.division.lower()
+        ).first()
+
+        if fallback_referrer:
+            user_instance.referred_by = fallback_referrer
+        else:
+            # যদি বিভাগের নামে ইউজার না থাকে, তবে 'admin' কে চেক করবে
+            admin_user = User.objects.filter(username="admin").first()
+            if admin_user:
+                user_instance.referred_by = admin_user
+
+    return user_instance

@@ -109,6 +109,7 @@ class ProductSerializer(serializers.ModelSerializer):
 
 
 class CartSerializer(serializers.ModelSerializer):
+    unit_type = serializers.ReadOnlyField(source="product.unit_type")
     product_name = serializers.ReadOnlyField(source='product.name')
     product_image = serializers.SerializerMethodField()
     product_price = serializers.SerializerMethodField()
@@ -118,15 +119,22 @@ class CartSerializer(serializers.ModelSerializer):
     class Meta:
         model = Cart
         fields = [
-            'id', 'product', 'product_name', 'product_price', 
-            'product_image', 'product_pv', 'quantity', 'item_subtotal'
+            "id",
+            "product",
+            "product_name",
+            "product_price",
+            "product_image",
+            "product_pv",
+            "unit_type",
+            "quantity",
+            "item_subtotal",
         ]
 
     def get_user_status(self, request):
         """ইউজার একটিভ কি না তা চেক করার কমন ফাংশন"""
         if not request or not request.user.is_authenticated:
             return None
-        
+
         user = request.user
         # ইউজার মডেল বা প্রোফাইল মডেল চেক করা
         u_status = getattr(user, 'status', '').lower()
@@ -137,12 +145,12 @@ class CartSerializer(serializers.ModelSerializer):
     def get_product_price(self, obj):
         request = self.context.get('request')
         product = obj.product if hasattr(obj, 'product') else obj.get('product')
-        
+
         if not product: return 0
 
         base_price = float(product.price)
         pv = float(product.point_value or 0)
-        
+
         # একটিভ মেম্বার হলে ডিসকাউন্ট (Price - PV*2)
         if self.get_user_status(request) == 'active':
             return base_price - (pv * 2) 
@@ -151,10 +159,10 @@ class CartSerializer(serializers.ModelSerializer):
     def get_product_pv(self, obj):
         request = self.context.get('request')
         product = obj.product if hasattr(obj, 'product') else obj.get('product')
-        
+
         if not product: return 0
 
-        # মামা, এখানে খেয়াল কর: একটিভ ইউজার কি আসলেই ০ পিভি পাবে? 
+        # মামা, এখানে খেয়াল কর: একটিভ ইউজার কি আসলেই ০ পিভি পাবে?
         # যদি তাই হয় তবে এই লজিক ঠিক আছে।
         if self.get_user_status(request) == 'active':
             return 0 
@@ -162,14 +170,15 @@ class CartSerializer(serializers.ModelSerializer):
 
     def get_item_subtotal(self, obj):
         # প্রাইস ইনটু কোয়ান্টিটি
-        price = self.get_product_price(obj)
-        quantity = obj.quantity if hasattr(obj, 'quantity') else obj.get('quantity', 0)
-        return round(price * quantity, 2) # ২ দশমিক ঘর পর্যন্ত রাউন্ড করে দিলাম
+        price = float(obj.product.price)
+        quantity = float(obj.quantity)
+
+        return round(price * quantity, 2)  # ২ দশমিক ঘর পর্যন্ত রাউন্ড করে দিলাম
 
     def get_product_image(self, obj):
         request = self.context.get('request')
         product = obj.product if hasattr(obj, 'product') else obj.get('product')
-        
+
         if product and product.image:
             return request.build_absolute_uri(product.image.url) if request else product.image.url
         return None

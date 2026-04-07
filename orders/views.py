@@ -21,6 +21,7 @@ import logging
 
 logger = logging.getLogger(__name__)
 
+
 class OrderCreateView(APIView):
     permission_classes = [IsAuthenticated]
 
@@ -28,92 +29,106 @@ class OrderCreateView(APIView):
         data = request.data
         user = request.user
         user.refresh_from_db()
-        items_data = data.get('items', [])
+        items_data = data.get("items", [])
 
         if not items_data:
-            return Response({"error": "আপনার কার্টটি খালি!"}, status=status.HTTP_400_BAD_REQUEST)
+            return Response(
+                {"error": "আপনার কার্টটি খালি!"}, status=status.HTTP_400_BAD_REQUEST
+            )
 
-        # ১. ইউজার স্ট্যাটাস চেক
         is_active_user = False
-        if hasattr(user, 'status'):
-            is_active_user = (str(user.status).lower().strip() == 'active')
+        if hasattr(user, "status"):
+            is_active_user = str(user.status).lower().strip() == "active"
 
         try:
             with transaction.atomic():
-                calculated_subtotal = Decimal('0.00')
+                calculated_subtotal = Decimal("0.00")
                 total_pv = 0
                 processed_items = []
 
                 for item in items_data:
-                    product = Product.objects.select_for_update().get(id=item['product_id'])
-                    qty = int(item['quantity'])
+                    # select_for_update ব্যবহার করা ভালো, রেস কন্ডিশন আটকাবে
+                    product = Product.objects.select_for_update().get(
+                        id=item["product_id"]
+                    )
+                    qty = Decimal(str(item["quantity"]))
 
                     if product.stock < qty:
                         raise Exception(f"{product.name} এর পর্যাপ্ত স্টক নেই!")
 
                     base_price = Decimal(str(product.price))
+                    # ✅ প্রোডাক্ট থেকে কেনা দাম (purchase_price) নিয়ে আসছি
+                    purchase_price = Decimal(str(product.purchase_price or 0))
                     unit_pv = int(product.point_value or 0)
 
                     if is_active_user:
-                        # ৫ PV = ১০ টাকা ডিসকাউন্ট (PV * 2)
                         discount = Decimal(str(unit_pv * 2))
                         final_unit_price = base_price - discount
                     else:
                         final_unit_price = base_price
 
-                    calculated_subtotal += (final_unit_price * qty)
-                    total_pv += (unit_pv * qty)
+                    calculated_subtotal += final_unit_price * qty
+                    total_pv += unit_pv * qty
 
-                    # স্টক কমানো
-                    product.stock -= qty
-                    product.save()
+                    # ❌ এখান থেকে স্টক কমানোর দরকার নেই, কারণ OrderItem.save() এ এটা অলরেডি আছে।
+                    # শুধু ডাটাগুলো লিস্টে রাখছি পরে লুপে সেভ করার জন্য।
 
-                    processed_items.append({
-                        'product': product,
-                        'quantity': qty,
-                        'price': final_unit_price,
-                        'pv': unit_pv
-                    })
+                    processed_items.append(
+                        {
+                            "product_id": product.id,
+                            "product_name": product.name,
+                            "quantity": qty,
+                            "price": final_unit_price,
+                            "purchase_price": purchase_price,  # ✅ ভিউ থেকেই পাঠিয়ে দিচ্ছি
+                            "pv": unit_pv,
+                        }
+                    )
 
-                # ২. শিপিং চার্জ ছাড়া মেইন অর্ডার সেভ
-                # এখানে total_amount সরাসরি subtotal এর সমান হবে
+                # ২. মেইন অর্ডার সেভ
                 order = Order.objects.create(
                     user=user,
-                    name=data.get('name'),
-                    phone=data.get('phone'),
-                    address=data.get('address'),
-                    city=data.get('city', ''),
-                    courier=data.get('courier', 'Sundarban Courier'),
+                    name=data.get("name"),
+                    phone=data.get("phone"),
+                    address=data.get("address"),
+                    city=data.get("city", ""),
+                    courier=data.get("courier", "Sundarban Courier"),
                     subtotal=calculated_subtotal,
-                    total_amount=calculated_subtotal, # 👈 কোনো শিপিং যোগ হবে না
+                    total_amount=calculated_subtotal,
                     total_pv=total_pv,
-                    payment_method=data.get('payment_method', 'cod'),
-                    transaction_id=data.get('transaction_id', ''),
-                    sender_number=data.get('sender_number', ''),
-                    status='Pending'
+                    payment_method=data.get("payment_method", "cod"),
+                    transaction_id=data.get("transaction_id", ""),
+                    sender_number=data.get("sender_number", ""),
+                    status="Pending",
                 )
 
-                # ৩. অর্ডার আইটেম সেভ
+                # ৩. অর্ডার আইটেম সেভ (এখানেই লাভ ক্যালকুলেট হবে)
                 for p_item in processed_items:
                     OrderItem.objects.create(
                         order=order,
-                        product_id=p_item['product'].id,
-                        product_name=p_item['product'].name,
-                        quantity=p_item['quantity'],
-                        price=p_item['price'],
-                        point_value=p_item['pv']
+                        product_id=p_item["product_id"],
+                        product_name=p_item["product_name"],
+                        quantity=p_item["quantity"],
+                        price=p_item["price"],
+                        purchase_price=p_item[
+                            "purchase_price"
+                        ],  # ✅ কেনা দাম পাঠিয়ে দিচ্ছি
+                        point_value=p_item["pv"],
                     )
 
-                return Response({
-                    "success": True,
-                    "message": "অর্ডারটি সফলভাবে সম্পন্ন হয়েছে!",
-                    "order_id": order.id,
-                    "payable_amount": float(calculated_subtotal)
-                }, status=status.HTTP_201_CREATED)
+                return Response(
+                    {
+                        "success": True,
+                        "message": "অর্ডারটি সফলভাবে সম্পন্ন হয়েছে!",
+                        "order_id": order.id,
+                        "payable_amount": float(calculated_subtotal),
+                    },
+                    status=status.HTTP_201_CREATED,
+                )
 
         except Exception as e:
-            print(f"DEBUG ERROR: {str(e)}") # এটি আপনার সার্ভার লগে দেখাবে
             return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
+
+
 # --- বাকি অ্যাডমিন ও ইউজার ভিউগুলো একই থাকবে ---
 class AdminOrderListView(generics.ListAPIView):
     queryset = Order.objects.all().order_by("-created_at")

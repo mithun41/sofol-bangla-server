@@ -20,6 +20,7 @@ from accounts.services import (
     update_user_rank,
     find_auto_placement_with_division,
 )
+from orders.models import Order, OrderItem
 from .models import BonusLog, FundLog, GlobalFund, User, WithdrawalRequest
 from .serializers import (
     ForgotPasswordSerializer,
@@ -44,14 +45,12 @@ class RegisterView(generics.CreateAPIView):
     authentication_classes = []
 
     def create(self, request, *args, **kwargs):
-        # ১. সিরিয়ালাইজার ভ্যালিডেশন (ইউজারনেম/ফোন ডুপ্লিকেট হলে এখানেই এরর দিবে)
         serializer = self.get_serializer(data=request.data)
         if not serializer.is_valid():
-            # এটি সরাসরি {"username": ["Already exists"], "phone": ["Invalid"]} ফরম্যাটে এরর দিবে
             return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
         data = request.data
-        user_division = data.get("division", "")
+        user_division = data.get("division", "").strip()  # বিভাগটা নিলাম
         reff_id = data.get("reff_id")
         placement_id = data.get("placement_id")
         position = data.get("position")
@@ -60,7 +59,7 @@ class RegisterView(generics.CreateAPIView):
         final_parent = None
         final_pos = None
 
-        # ২. রেফারেল আইডি ভ্যালিডেশন
+        # ১. রেফারেল লজিক (ম্যানুয়াল অথবা অটো বিভাগ ভিত্তিক)
         if reff_id:
             referrer = User.objects.filter(reff_id=reff_id).first()
             if not referrer:
@@ -68,8 +67,18 @@ class RegisterView(generics.CreateAPIView):
                     {"reff_id": ["Invalid Referral ID. User not found."]},
                     status=status.HTTP_400_BAD_REQUEST,
                 )
+        else:
+            # --- অটো রেফারেল লজিক শুরু ---
+            if user_division:
+                # বিভাগের নামে ইউজার খুঁজছি (যেমন: 'dhaka', 'rajshahi')
+                referrer = User.objects.filter(username__iexact=user_division).first()
 
-        # ৩. প্লেসমেন্ট আইডি ভ্যালিডেশন
+            # যদি বিভাগের নামে ইউজার না পায়, তবে সুপারইউজার/এডমিনকে ধরবে
+            if not referrer:
+                referrer = User.objects.filter(is_superuser=True).first()
+            # --- অটো রেফারেল লজিক শেষ ---
+
+        # ২. প্লেসমেন্ট আইডি ভ্যালিডেশন
         if placement_id:
             target_parent = User.objects.filter(placement_id=placement_id).first()
             if not target_parent:
@@ -78,7 +87,6 @@ class RegisterView(generics.CreateAPIView):
                     status=status.HTTP_400_BAD_REQUEST,
                 )
 
-            # ৪. পজিশন অকুপাইড কি না চেক
             if position:
                 if position not in ["left", "right"]:
                     return Response(
@@ -101,24 +109,17 @@ class RegisterView(generics.CreateAPIView):
 
                 final_parent, final_pos = target_parent, position
             else:
-                # পজিশন না দিলে অটো প্লেসমেন্ট
                 final_parent, final_pos = find_auto_placement_with_division(
                     target_parent, user_division
                 )
 
+        # ৩. যদি প্লেসমেন্ট আইডি না থাকে, তবে রেফারারের আন্ডারে অটো প্লেসমেন্ট
         elif referrer:
             final_parent, final_pos = find_auto_placement_with_division(
                 referrer, user_division
             )
 
-        else:
-            root_user = User.objects.filter(is_superuser=True).first()
-            if root_user:
-                final_parent, final_pos = find_auto_placement_with_division(
-                    root_user, user_division
-                )
-
-        # ৫. ইউজার তৈরি করা (Atomic Transaction)
+        # ৪. ইউজার তৈরি করা (Atomic Transaction)
         try:
             with transaction.atomic():
                 user = User.objects.create_user(
@@ -128,7 +129,7 @@ class RegisterView(generics.CreateAPIView):
                     phone=data.get("phone"),
                     name=data.get("name", ""),
                     division=user_division,
-                    referred_by=referrer,
+                    referred_by=referrer,  # এখানে আমাদের অটো বা ম্যানুয়াল রেফারার বসে যাবে
                     placement_under=final_parent,
                     position=final_pos,
                     status="inactive",
@@ -141,13 +142,15 @@ class RegisterView(generics.CreateAPIView):
                         "user_info": {
                             "username": user.username,
                             "reff_id": user.reff_id,
+                            "referred_by": (
+                                user.referred_by.username if user.referred_by else None
+                            ),
                         },
                     },
                     status=status.HTTP_201_CREATED,
                 )
 
         except Exception as e:
-            # ডাটাবেজ লেভেলের কোনো এরর হলে সেটা জেনেরিক ফিল্ডে পাঠানো
             return Response(
                 {"non_field_errors": [str(e)]}, status=status.HTTP_400_BAD_REQUEST
             )
@@ -519,38 +522,44 @@ def admin_approve_withdraw(request, pk):
         return Response({"error": "Not found"}, status=404)
 
 
-class AdminDashboardStatsView(APIView):
-    """
-    অ্যাডমিন ড্যাশবোর্ডের জন্য এক্সেকিউটিভ সামারি এবং গ্লোবাল ফান্ড স্ট্যাটাস প্রদান করে।
-    """
 
+
+class AdminDashboardStatsView(APIView):
     permission_classes = [IsAdminUser]
 
     def get(self, request):
-        # ১. গ্লোবাল ফান্ডের লেটেস্ট রেকর্ড নেওয়া
         fund = GlobalFund.objects.first()
-
-        # ২. বর্তমান মাস ও বছর নির্ধারণ করা
         current_month = datetime.now().month
         current_year = datetime.now().year
 
-        # ৩. মাসিক ইনকাম (Inflow) ক্যালকুলেশন
-        # FundLog মডেলে transaction_type 'inbound' হওয়া চাই
+        # --- নতুন প্রফিট ক্যালকুলেশন লজিক শুরু ---
+
+        # ১. সর্বমোট লাভ (শুধু Completed অর্ডারের আইটেম থেকে)
+        total_profit = OrderItem.objects.filter(order__status="Completed").aggregate(
+            total=Sum("profit")
+        )["total"] or Decimal("0.00")
+
+        # ২. চলতি মাসের লাভ (শুধু Completed অর্ডার থেকে)
+        monthly_profit = OrderItem.objects.filter(
+            order__status="Completed",
+            order__created_at__month=current_month,
+            order__created_at__year=current_year,
+        ).aggregate(total=Sum("profit"))["total"] or Decimal("0.00")
+
+        # --- নতুন প্রফিট ক্যালকুলেশন লজিক শেষ ---
+
         monthly_inflow = FundLog.objects.filter(
             transaction_type="inbound",
             created_at__month=current_month,
             created_at__year=current_year,
         ).aggregate(total=Sum("amount"))["total"] or Decimal("0.00")
 
-        # ৪. মাসিক আউটকাম (Outflow) ক্যালকুলেশন
-        # FundLog মডেলে transaction_type 'outbound' হওয়া চাই
         monthly_outflow = FundLog.objects.filter(
             transaction_type="outbound",
             created_at__month=current_month,
             created_at__year=current_year,
         ).aggregate(total=Sum("amount"))["total"] or Decimal("0.00")
 
-        # ৫. ফাইনাল রেসপন্স ডাটা স্ট্রাকচার (তোর ফ্রন্টএন্ডের সাথে মিল রেখে)
         data = {
             "summary": {
                 "total_users": User.objects.count(),
@@ -558,9 +567,14 @@ class AdminDashboardStatsView(APIView):
                 "pending_withdrawals": WithdrawalRequest.objects.filter(
                     status="pending"
                 ).count(),
+                "completed_orders": Order.objects.filter(
+                    status="Completed"
+                ).count(),  # কমপ্লিটেড অর্ডার সংখ্যা
                 "monthly_revenue": float(monthly_inflow),
                 "monthly_payout": float(monthly_outflow),
-                "net_profit": float(monthly_inflow - monthly_outflow),
+                "monthly_profit": float(monthly_profit),  # চলতি মাসের প্রফিট
+                "net_profit": float(total_profit),  # লাইফটাইম প্রফিট
+                "net_fund_balance": float(monthly_inflow - monthly_outflow),
             },
             "funds": {
                 "referral": float(fund.referral_fund) if fund else 0.0,
@@ -573,9 +587,6 @@ class AdminDashboardStatsView(APIView):
         }
 
         return Response(data)
-
-
-# ... তোর অন্যান্য ইম্পোর্ট ...
 
 
 # --- ১. LOGOUT API (মোবাইল অ্যাপের জন্য মাস্ট) ---

@@ -36,6 +36,7 @@ class Order(models.Model):
     address = models.TextField()
     city = models.CharField(max_length=50)
     total_pv = models.PositiveIntegerField(default=0)
+    purchase_price = models.DecimalField(max_digits=10, decimal_places=2, default=0.00)
     subtotal = models.DecimalField(max_digits=12, decimal_places=2)
     total_amount = models.DecimalField(max_digits=12, decimal_places=2)
     payment_method = models.CharField(max_length=10, choices=PAYMENT_METHODS)
@@ -99,19 +100,58 @@ class Order(models.Model):
         return f"{self.order_number} - {self.name}"
 
 
+from django.db import models, transaction
+from decimal import Decimal
+
+
 class OrderItem(models.Model):
     order = models.ForeignKey(Order, related_name="items", on_delete=models.CASCADE)
     product_id = models.IntegerField()
     product_name = models.CharField(max_length=255)
     quantity = models.DecimalField(max_digits=10, decimal_places=3)
     price = models.DecimalField(max_digits=10, decimal_places=2)
-    # ✅ এই যে মামা, তোর point_value ফিল্ডটা আবার যোগ করে দিলাম
+
+    # নতুন ফিল্ড
+    purchase_price = models.DecimalField(max_digits=10, decimal_places=2, default=0.00)
+    profit = models.DecimalField(max_digits=10, decimal_places=2, default=0.00)
     point_value = models.IntegerField(default=0)
 
     def save(self, *args, **kwargs):
         is_new = self.pk is None
+
+        # ১. পারচেজ প্রাইস সেট করার লজিক
+        if not self.purchase_price or self.purchase_price == Decimal("0.00"):
+            from products.models import Product
+
+            try:
+                # product_id দিয়ে ডাটাবেজ থেকে সরাসরি প্রোডাক্ট আনা
+                product_obj = Product.objects.get(id=self.product_id)
+                self.purchase_price = product_obj.purchase_price
+                print(
+                    f"DEBUG: Product Found! Name: {product_obj.name}, P_Price: {product_obj.purchase_price}"
+                )
+            except Product.DoesNotExist:
+                print(f"DEBUG: Product NOT Found for ID: {self.product_id}")
+                self.purchase_price = Decimal("0.00")
+            except Exception as e:
+                print(f"DEBUG: General Error: {str(e)}")
+
+        # ২. লাভ ক্যালকুলেট করা (Decimal এ কনভার্ট করে নিচ্ছি যাতে ভুল না হয়)
+        qty = Decimal(str(self.quantity))
+        price_sold = Decimal(str(self.price))
+        buy_price = Decimal(str(self.purchase_price or 0))
+
+        self.profit = (price_sold - buy_price) * qty
+
+        # টার্মিনালে চেক করার জন্য প্রিন্ট (সার্ভার লগ চেক করিস মামা)
+        print(
+            f"DEBUG: Final Calculation -> Qty: {qty}, Sold: {price_sold}, Buy: {buy_price}, Profit: {self.profit}"
+        )
+
+        # ৩. ডাটা সেভ করা
         super().save(*args, **kwargs)
 
+        # ৪. স্টক কমানোর লজিক (তোর আগের কোড)
         if is_new:
             from products.models import Product
 
@@ -122,7 +162,6 @@ class OrderItem(models.Model):
                     .first()
                 )
                 if product:
-                    qty = Decimal(str(self.quantity))
                     if product.unit_type == "gram":
                         product.stock -= qty / Decimal("1000.0")
                     else:

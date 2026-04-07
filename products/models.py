@@ -92,21 +92,18 @@ class Product(models.Model):
 
 class Cart(models.Model):
     user = models.ForeignKey(
-        settings.AUTH_USER_MODEL, 
-        on_delete=models.CASCADE, 
-        related_name='cart_items'
+        settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="cart_items"
     )
     product = models.ForeignKey(
-        Product, 
-        on_delete=models.CASCADE, 
-        related_name='in_carts'
+        Product, on_delete=models.CASCADE, related_name="in_carts"
     )
-    quantity = models.PositiveIntegerField(default=1)
+    # PositiveIntegerField পরিবর্তন করে DecimalField দিলাম
+    quantity = models.DecimalField(max_digits=10, decimal_places=3, default=1.000)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
-        unique_together = ('user', 'product')
+        unique_together = ("user", "product")
 
     def __str__(self):
         return f"{self.user.username} - {self.product.name} ({self.quantity})"
