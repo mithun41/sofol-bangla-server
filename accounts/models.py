@@ -182,7 +182,7 @@ class WithdrawalRequest(models.Model):
     amount = models.DecimalField(max_digits=12, decimal_places=2)
     method = models.CharField(max_length=50)
     account_number = models.CharField(
-        max_length=50, null=True, blank=True
+        max_length=50, default="", blank=True
     )  # এটি যোগ করুন
     account_details = models.TextField()
     status = models.CharField(max_length=10, choices=STATUS_CHOICES, default="pending")
