@@ -78,10 +78,10 @@ class POSOrderCreate(APIView):
 
                 for item in items:
                     product = Product.objects.select_for_update().get(id=item['product_id'])
-                    
+
                     # কোয়ান্টিটিকেও ডেসিমাল স্ট্রিং থেকে নেওয়া সেফ
                     qty = Decimal(str(item.get('quantity', '1')))
-                    
+
                     if product.stock < int(qty):
                         raise Exception(f"{product.name} আউট অফ স্টক!")
 
@@ -139,18 +139,15 @@ class POSOrderCreate(APIView):
                     )
 
                 # ৫. ফান্ড এবং পয়েন্ট ডিস্ট্রিবিউশন
-                if total_pv > Decimal('0.00'):
+                if total_pv > Decimal("0.00"):
                     # ✅ এখানে ট্রিক: float(total_pv) করে পাঠানো যেন এক্সটার্নাল ফাংশন এরর না দেয়
                     try:
-                        distribute_money_to_funds(float(total_pv))
-                    except:
-                        pass # মেইন ট্রানজ্যাকশন যেন সফল হয়
-                    
-                    # পয়েন্ট আপডেট (F expression logic fixed for PythonAnywhere)
-                    User.objects.filter(id=customer.id).update(
-                        points=F('points') + total_pv
-                    )
-                    
+                        distribute_money_to_funds(customer, float(total_pv))
+                    except Exception as e:
+                         print(f"Distribution Error: {str(e)}")
+
+                   
+
                     customer.refresh_from_db() 
                     # কাস্টমার স্ট্যাটাস চেক
                     current_points = Decimal(str(customer.points or '0.00'))

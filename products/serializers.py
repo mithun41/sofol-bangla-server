@@ -169,11 +169,29 @@ class CartSerializer(serializers.ModelSerializer):
         return float(product.point_value or 0)
 
     def get_item_subtotal(self, obj):
-        # প্রাইস ইনটু কোয়ান্টিটি
-        price = float(obj.product.price)
-        quantity = float(obj.quantity)
+        try:
+            # ১. ডাটা এক্সট্রাকশন (Dict অথবা Object হ্যান্ডেলিং)
+            if isinstance(obj, dict):
+                product_data = obj.get("product")
+                quantity = float(obj.get("quantity", 0))
+            else:
+                product_data = getattr(obj, "product", None)
+                quantity = float(getattr(obj, "quantity", 0))
 
-        return round(price * quantity, 2)  # ২ দশমিক ঘর পর্যন্ত রাউন্ড করে দিলাম
+            # ২. প্রাইস বের করা
+            price = 0.0
+            if isinstance(product_data, dict):
+                price = float(product_data.get("price", 0))
+            elif product_data:
+                price = float(getattr(product_data, "price", 0))
+
+            # ৩. ক্যালকুলেশন
+            return round(price * quantity, 2)
+
+        except Exception as e:
+            # যদি কোনো এরর হয় তবে ০ রিটার্ন করবে এবং কনসোলে প্রিন্ট করবে
+            print(f"DEBUG - Subtotal Error: {str(e)}")
+            return 0.0
 
     def get_product_image(self, obj):
         request = self.context.get('request')

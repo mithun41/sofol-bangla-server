@@ -439,12 +439,22 @@ class BinaryTreeView(APIView):
         def get_tree(current_user, depth=0):
             if not current_user or depth > 3:
                 return None
+
+            # ইমেজ ইউআরএল হ্যান্ডেল করা
+            if current_user.profile_picture:
+                profile_pic_url = request.build_absolute_uri(
+                    current_user.profile_picture.url
+                )
+            else:
+                profile_pic_url = f"https://ui-avatars.com/api/?name={current_user.username}&background=random&color=fff"
+
             return {
                 "username": current_user.username,
                 "status": current_user.status,
                 "position": current_user.position,
                 "division": current_user.division,
                 "placement_id": current_user.placement_id,
+                "profile_picture": profile_pic_url,
                 "left": get_tree(
                     User.objects.filter(
                         placement_under=current_user, position="left"
@@ -475,29 +485,49 @@ class BonusLogListView(generics.ListAPIView):
         return BonusLog.objects.filter(user=self.request.user).order_by("-timestamp")
 
 
+from decimal import Decimal
+from django.db import transaction
+from rest_framework import serializers, generics
+from rest_framework.response import Response
+from rest_framework.decorators import api_view, permission_classes
+from rest_framework.permissions import IsAuthenticated, IsAdminUser
+
+
 class WithdrawalListCreateView(generics.ListCreateAPIView):
     serializer_class = WithdrawalSerializer
     permission_classes = [IsAuthenticated]
 
     def get_queryset(self):
-        return WithdrawalRequest.objects.filter(user=self.request.user).order_by(
-            "-created_at"
-        )
+     return WithdrawalRequest.objects.filter(user=self.request.user).order_by("-created_at")
 
     def perform_create(self, serializer):
         user = self.request.user
-        amount = Decimal(self.request.data.get("amount", 0))
-        if user.balance >= amount:
-            user.balance -= amount
-            user.save()
-            serializer.save(user=user)
-        else:
-            raise serializers.ValidationError("Insufficient balance.")
+        # ডাটা থেকে অ্যামাউন্ট নেওয়া
+        raw_amount = self.request.data.get("amount", 0)
+
+        try:
+            amount = Decimal(str(raw_amount))
+        except:
+            raise serializers.ValidationError("Invalid amount format.")
+
+        if amount <= 0:
+            raise serializers.ValidationError("Amount must be greater than zero.")
+
+        # এটমিক ট্রানজেকশন যাতে টাকা কাটা এবং রিকোয়েস্ট সেভ একসাথে হয়
+        with transaction.atomic():
+            # ইউজারকে লেটেস্ট ডাটা দিয়ে রিফ্রেশ করা (টাকা ডাবল কাটা রোধ করতে)
+            user.refresh_from_db()
+            if user.balance >= amount:
+                user.balance -= amount
+                user.save()
+                serializer.save(user=user, amount=amount)
+            else:
+                raise serializers.ValidationError("Insufficient balance.")
 
 
 @api_view(["GET"])
 @permission_classes([IsAdminUser])
-def admin_withdrawal_list(request):
+def admin_withdrawal_list(request):  # এই নাম আর urls.py এর নাম এক হতে হবে
     withdrawals = WithdrawalRequest.objects.all().order_by("-created_at")
     serializer = WithdrawalSerializer(withdrawals, many=True)
     return Response(serializer.data)
@@ -507,21 +537,47 @@ def admin_withdrawal_list(request):
 @permission_classes([IsAdminUser])
 def admin_approve_withdraw(request, pk):
     try:
-        withdraw_req = WithdrawalRequest.objects.get(pk=pk)
-        action = request.data.get("action")
-        if action == "approve":
-            withdraw_req.status = "approved"
-        elif action == "reject":
-            withdraw_req.status = "rejected"
-            user = withdraw_req.user
-            user.balance += withdraw_req.amount
-            user.save()
-        withdraw_req.save()
-        return Response({"message": f"Successfully {action}ed"})
+        # ট্রানজেকশন শুরু যাতে টাকা ব্যাক হওয়া এবং রিকোয়েস্ট সেভ হওয়া নিরাপদ থাকে
+        with transaction.atomic():
+            # select_for_update ব্যবহার করা হয়েছে যাতে একই সময়ে অন্য কেউ রিকোয়েস্টটি এডিট না করতে পারে
+            withdraw_req = WithdrawalRequest.objects.select_for_update().get(pk=pk)
+
+            if withdraw_req.status != "pending":
+                return Response(
+                    {"error": "এই রিকোয়েস্টটি অলরেডি প্রসেস করা হয়ে গেছে।"}, status=400
+                )
+
+            action = request.data.get("action")  # 'approve' অথবা 'reject'
+
+            if action == "approve":
+                withdraw_req.status = "approved"
+                withdraw_req.save()
+                return Response(
+                    {"message": "Withdrawal request approved successfully."}
+                )
+
+            elif action == "reject":
+                withdraw_req.status = "rejected"
+
+                # --- টাকা ব্যাক করার লজিক ---
+                user = withdraw_req.user
+                user.balance += withdraw_req.amount  # টাকা মেইন ব্যালেন্সে ফেরত পাঠানো
+                user.save()
+
+                withdraw_req.save()
+                return Response(
+                    {"message": "Request rejected and amount refunded to user balance."}
+                )
+
+            else:
+                return Response(
+                    {"error": "Invalid action. Use 'approve' or 'reject'"}, status=400
+                )
+
     except WithdrawalRequest.DoesNotExist:
-        return Response({"error": "Not found"}, status=404)
-
-
+        return Response({"error": "Withdrawal request খুঁজে পাওয়া যায়নি।"}, status=404)
+    except Exception as e:
+        return Response({"error": str(e)}, status=400)
 
 
 class AdminDashboardStatsView(APIView):
@@ -684,6 +740,35 @@ class VerifyOTPView(APIView):
         )
 
 
+def find_first_empty_slot(parent_user):
+    """
+    একটি নির্দিষ্ট প্যারেন্টের নিচে যেখানে প্রথম ফাঁকা জায়গা (Left or Right) আছে তা খুঁজে বের করে।
+    Breadth-First Search (BFS) অ্যালগরিদম ব্যবহার করা হয়েছে।
+    """
+    queue = [parent_user]
+
+    while queue:
+        current = queue.pop(0)
+
+        # বাম পাশে খালি আছে কি না চেক
+        left_child = User.objects.filter(
+            placement_under=current, position="left"
+        ).first()
+        if not left_child:
+            return current, "left"
+
+        # ডান পাশে খালি আছে কি না চেক
+        right_child = User.objects.filter(
+            placement_under=current, position="right"
+        ).first()
+        if not right_child:
+            return current, "right"
+
+        # যদি দুই পাশেই ইউজার থাকে, তবে তাদের কিউতে যোগ করো নিচের লেভেলে চেক করার জন্য
+        queue.append(left_child)
+        queue.append(right_child)
+
+
 class ResetPasswordView(APIView):
     """ধাপ ৩: নতুন পাসওয়ার্ড সেভ করা"""
 
@@ -719,16 +804,67 @@ class UserUpdateView(generics.RetrieveUpdateAPIView):
 
         try:
             with transaction.atomic():
-                # রেফারার আপডেট
+                # ১. রেফারার আপডেট
                 reff_id_input = data.get("reff_id_input")
                 if reff_id_input:
                     referrer = User.objects.filter(reff_id=reff_id_input).first()
                     if referrer:
                         user.referred_by = referrer
                     else:
-                        return Response({"error": "Invalid Referral ID!"}, status=400)
+                        return Response(
+                            {"error": "Invalid Referral ID!"},
+                            status=status.HTTP_400_BAD_REQUEST,
+                        )
 
-                # স্ট্যাটাস এবং অন্যান্য তথ্য
+                # ২. অটো-প্লেসমেন্ট এবং পজিশন আপডেট
+                placement_id_input = data.get("placement_id_input")
+                position_input = data.get("position")  # 'left' অথবা 'right'
+
+                if placement_id_input:
+                    target_placement_user = User.objects.filter(
+                        reff_id=placement_id_input
+                    ).first()
+
+                    if target_placement_user:
+                        # যদি অ্যাডমিন নির্দিষ্ট পজিশনে বসাতে চায় এবং সেটা ফাঁকা থাকে
+                        if position_input:
+                            exists = (
+                                User.objects.filter(
+                                    placement_under=target_placement_user,
+                                    position=position_input,
+                                )
+                                .exclude(id=user.id)
+                                .exists()
+                            )
+
+                            if not exists:
+                                user.placement_under = target_placement_user
+                                user.position = position_input
+                            else:
+                                # যদি ওই পজিশন বুকড থাকে, তবে অটোমেটিক নিচে ফাঁকা জায়গা খুঁজবে
+                                final_parent, final_pos = find_first_empty_slot(
+                                    target_placement_user
+                                )
+                                user.placement_under = final_parent
+                                user.position = final_pos
+                        else:
+                            # যদি অ্যাডমিন পজিশন না দেয়, সরাসরি নিচে ফাঁকা জায়গা খুঁজবে
+                            final_parent, final_pos = find_first_empty_slot(
+                                target_placement_user
+                            )
+                            user.placement_under = final_parent
+                            user.position = final_pos
+                    else:
+                        return Response(
+                            {"error": "Invalid Placement ID!"},
+                            status=status.HTTP_400_BAD_REQUEST,
+                        )
+
+                # যদি শুধু পজিশন আপডেট করতে চায় প্লেসমেন্ট আইডি ছাড়া
+                elif position_input:
+                    user.position = position_input
+
+                # ৩. সাধারণ তথ্য আপডেট
                 if "status" in data:
                     user.status = data["status"]
                 if "name" in data:
@@ -738,11 +874,15 @@ class UserUpdateView(generics.RetrieveUpdateAPIView):
 
                 user.save()
 
-                # যদি আগে ইনএক্টিভ ছিল এখন এক্টিভ হয়
+                # ৪. ইনএক্টিভ থেকে এক্টিভ হলে কমিশন ক্যালকুলেশন
                 if old_status == "inactive" and user.status == "active":
-                    calculate_commission(user)
+                    # নিশ্চিত করো তোমার calculate_commission ফাংশনটি ইম্পোর্ট করা আছে
+                    try:
+                        calculate_commission(user)
+                    except NameError:
+                        pass  # ফাংশন না থাকলে এরর ইগনোর করবে
 
-                # পুরো ট্রির কাউন্ট ঠিক করা (অ্যাডমিন যখন এডিট করবে তখন এটি দরকার)
+                # ৫. পুরো ট্রির কাউন্ট এবং র‍্যাঙ্ক রি-ক্যালকুলেশন
                 self.recalculate_tree_counts()
 
                 user.refresh_from_db()

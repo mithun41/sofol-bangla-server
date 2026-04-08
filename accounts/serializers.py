@@ -271,7 +271,7 @@ class WithdrawalSerializer(serializers.ModelSerializer):
             "amount",
             "username",
             "method",
-            "account_number",
+            "account_details",  
             "status",
             "created_at",
         ]
