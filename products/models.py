@@ -29,6 +29,15 @@ class Category(models.Model):
         return self.name
 
 
+import random
+import barcode
+from barcode.writer import ImageWriter
+from io import BytesIO
+from django.core.files import File
+from django.db import models
+from django.utils.text import slugify
+
+
 class Product(models.Model):
     UNIT_CHOICES = [
         ("piece", "Piece"),
@@ -38,7 +47,7 @@ class Product(models.Model):
     ]
 
     category = models.ForeignKey(
-        Category,
+        "Category",  # আপনার ক্যাটাগরি মডেলের নাম অনুযায়ী
         on_delete=models.SET_NULL,
         related_name="products",
         null=True,
@@ -48,12 +57,12 @@ class Product(models.Model):
     slug = models.SlugField(max_length=250, unique=True, blank=True)
     description = models.TextField(blank=True, null=True)
 
-    # প্রাইসিং ফিল্ডস (তোর আগের গুলাসহ)
+    # প্রাইসিং ফিল্ডস
     purchase_price = models.DecimalField(max_digits=12, decimal_places=2, default=0.00)
     price = models.DecimalField(max_digits=12, decimal_places=2)  # Selling Price
     point_value = models.IntegerField(default=0)
 
-    # স্টক এবং ইউনিট (নতুন ম্যানেজমেন্ট)
+    # স্টক এবং ইউনিট
     unit_type = models.CharField(max_length=10, choices=UNIT_CHOICES, default="piece")
     stock = models.DecimalField(max_digits=12, decimal_places=3, default=0.000)
 
@@ -61,28 +70,34 @@ class Product(models.Model):
     barcode_number = models.CharField(max_length=13, unique=True, blank=True)
     barcode_image = models.ImageField(upload_to="barcodes/", blank=True, null=True)
 
-    # স্ট্যাটাস ফিল্ডস (তোর আগের গুলাসহ)
+    # স্ট্যাটাস ফিল্ডস
     is_active = models.BooleanField(default=True)
     is_featured = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)
 
     def save(self, *args, **kwargs):
+        # অটোমেটিক স্লাগ জেনারেট করা
         if not self.slug:
             self.slug = slugify(self.name) + "-" + str(random.randint(1000, 9999))
 
+        # বারকোড জেনারেট করার লজিক
         if not self.barcode_number:
+            # ১৩ ডিজিটের ইউনিক নাম্বার জেনারেট
             number = "".join([str(random.randint(0, 9)) for _ in range(13)])
             while Product.objects.filter(barcode_number=number).exists():
                 number = "".join([str(random.randint(0, 9)) for _ in range(13)])
             self.barcode_number = number
 
-            EAN = barcode.get_barcode_class("ean13")
-            ean = EAN(self.barcode_number, writer=ImageWriter())
+            # code128 ব্যবহার করে বারকোড ইমেজ তৈরি (এটি ডাটা পরিবর্তন করে না)
+            CODE128 = barcode.get_barcode_class("code128")
+            code_img = CODE128(self.barcode_number, writer=ImageWriter())
+
             buffer = BytesIO()
-            ean.write(buffer)
-            self.barcode_image.save(
-                f"barcode-{self.barcode_number}.png", File(buffer), save=False
-            )
+            code_img.write(buffer)
+
+            # ইমেজ ফাইল সেভ করা
+            filename = f"barcode-{self.barcode_number}.png"
+            self.barcode_image.save(filename, File(buffer), save=False)
 
         super().save(*args, **kwargs)
 
