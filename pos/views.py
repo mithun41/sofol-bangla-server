@@ -14,11 +14,27 @@ from accounts.services import distribute_money_to_funds
 from .serializers import POSProductSerializer, POSCustomerSerializer
 
 User = get_user_model()
+from rest_framework import permissions
+
+
+class IsPOSAdminOrAdmin(permissions.BasePermission):
+    """
+    ইউজার যদি 'admin' অথবা 'posAdmin' রোলের হয়, তবেই অ্যাক্সেস পাবে।
+    """
+
+    def has_permission(self, request, view):
+        # ইউজারকে অবশ্যই লগইন করা থাকতে হবে
+        if not request.user or not request.user.is_authenticated:
+            return False
+
+        # রোলের ভিত্তিতে পারমিশন চেক
+        return request.user.role in ["admin", "posAdmin"]
+
 
 # ১. প্রোডাক্ট সার্চ (বারকোড নম্বর, নাম বা আইডি দিয়ে)
 class POSProductSearch(APIView):
     authentication_classes = [JWTAuthentication]
-    permission_classes = [permissions.IsAdminUser]
+    permission_classes = [IsPOSAdminOrAdmin]
 
     def get(self, request):
         query = request.query_params.get('q', '').strip()
@@ -38,7 +54,7 @@ class POSProductSearch(APIView):
 # ২. কাস্টমার সার্চ (ইউজারনেম বা ফোন দিয়ে)
 class POSCustomerSearch(APIView):
     authentication_classes = [JWTAuthentication]
-    permission_classes = [permissions.IsAdminUser]
+    permission_classes = [IsPOSAdminOrAdmin]
 
     def get(self, request):
         query = request.query_params.get('q', '')
@@ -52,7 +68,7 @@ class POSCustomerSearch(APIView):
 
 class POSOrderCreate(APIView):
     authentication_classes = [JWTAuthentication]
-    permission_classes = [permissions.IsAdminUser]
+    permission_classes = [IsPOSAdminOrAdmin]
 
     def post(self, request):
         data = request.data
@@ -144,9 +160,7 @@ class POSOrderCreate(APIView):
                     try:
                         distribute_money_to_funds(customer, float(total_pv))
                     except Exception as e:
-                         print(f"Distribution Error: {str(e)}")
-
-                   
+                        print(f"Distribution Error: {str(e)}")
 
                     customer.refresh_from_db() 
                     # কাস্টমার স্ট্যাটাস চেক

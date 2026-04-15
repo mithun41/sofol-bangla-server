@@ -5,7 +5,6 @@ from decimal import Decimal
 
 
 class User(AbstractUser):
-    # ... তোর ফিল্ডগুলো (আগের মতো সব ঠিক থাকবে) ...
     name = models.CharField(max_length=255, blank=True)
     email = models.EmailField(unique=False, null=True, blank=True)
     phone = models.CharField(max_length=15, unique=False)
@@ -79,8 +78,13 @@ class User(AbstractUser):
         choices=(("active", "Active"), ("inactive", "Inactive")),
         default="inactive",
     )
+    ROLE_CHOICES = [
+        ("admin", "Admin"),
+        ("customer", "Customer"),
+        ("posAdmin", "POS Admin"),
+    ]
     star_level = models.IntegerField(default=0)
-    role = models.CharField(max_length=20, default="customer")
+    role = models.CharField(max_length=20, choices=ROLE_CHOICES, default="customer")
     createdAt = models.DateTimeField(auto_now_add=True, null=True, blank=True)
 
     def save(self, *args, **kwargs):
