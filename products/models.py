@@ -47,7 +47,7 @@ class Product(models.Model):
     ]
 
     category = models.ForeignKey(
-        "Category",  # আপনার ক্যাটাগরি মডেলের নাম অনুযায়ী
+        "Category",
         on_delete=models.SET_NULL,
         related_name="products",
         null=True,
@@ -60,13 +60,14 @@ class Product(models.Model):
     # প্রাইসিং ফিল্ডস
     purchase_price = models.DecimalField(max_digits=12, decimal_places=2, default=0.00)
     price = models.DecimalField(max_digits=12, decimal_places=2)  # Selling Price
-    point_value = models.IntegerField(default=0)
+    point_value = models.DecimalField(max_digits=10, decimal_places=2, default=0.00)
 
     # স্টক এবং ইউনিট
     unit_type = models.CharField(max_length=10, choices=UNIT_CHOICES, default="piece")
     stock = models.DecimalField(max_digits=12, decimal_places=3, default=0.000)
 
     image = models.ImageField(upload_to="products/", null=True, blank=True)
+    # এখানে unique=True এবং blank=True রাখা হয়েছে
     barcode_number = models.CharField(max_length=13, unique=True, blank=True)
     barcode_image = models.ImageField(upload_to="barcodes/", blank=True, null=True)
 
@@ -76,30 +77,39 @@ class Product(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
 
     def save(self, *args, **kwargs):
-        # অটোমেটিক স্লাগ জেনারেট করা
+        # ১. অটোমেটিক স্লাগ জেনারেট করা
         if not self.slug:
             self.slug = slugify(self.name) + "-" + str(random.randint(1000, 9999))
 
-        # বারকোড জেনারেট করার লজিক
+        # ২. বারকোড লজিক (অটো জেনারেশন যদি ফাঁকা থাকে)
         if not self.barcode_number:
-            # ১৩ ডিজিটের ইউনিক নাম্বার জেনারেট
             number = "".join([str(random.randint(0, 9)) for _ in range(13)])
             while Product.objects.filter(barcode_number=number).exists():
                 number = "".join([str(random.randint(0, 9)) for _ in range(13)])
             self.barcode_number = number
 
-            # code128 ব্যবহার করে বারকোড ইমেজ তৈরি (এটি ডাটা পরিবর্তন করে না)
-            CODE128 = barcode.get_barcode_class("code128")
-            code_img = CODE128(self.barcode_number, writer=ImageWriter())
-
-            buffer = BytesIO()
-            code_img.write(buffer)
-
-            # ইমেজ ফাইল সেভ করা
-            filename = f"barcode-{self.barcode_number}.png"
-            self.barcode_image.save(filename, File(buffer), save=False)
+        # ৩. বারকোড ইমেজ জেনারেট লজিক (আপডেটের জন্য উপযোগী)
+        # ডাটাবেজে আগে থেকে কি নাম্বার আছে তা চেক করার জন্য
+        if self.pk:
+            old_product = Product.objects.get(pk=self.pk)
+            # যদি বারকোড নাম্বার পরিবর্তন করা হয়, তবে আগের ইমেজ ডিলিট করে নতুনটা বানাতে হবে
+            if old_product.barcode_number != self.barcode_number:
+                self.generate_barcode_image()
+        else:
+            # নতুন প্রোডাক্ট তৈরির সময় ইমেজ না থাকলে বানাবে
+            if not self.barcode_image:
+                self.generate_barcode_image()
 
         super().save(*args, **kwargs)
+
+    def generate_barcode_image(self):
+        """বারকোড ইমেজ তৈরির আলাদা ফাংশন"""
+        CODE128 = barcode.get_barcode_class("code128")
+        code_img = CODE128(self.barcode_number, writer=ImageWriter())
+        buffer = BytesIO()
+        code_img.write(buffer)
+        filename = f"barcode-{self.barcode_number}.png"
+        self.barcode_image.save(filename, File(buffer), save=False)
 
     def __str__(self):
         return self.name

@@ -64,7 +64,7 @@ class ProductSerializer(serializers.ModelSerializer):
         ]
         extra_kwargs = {
             "is_active": {"read_only": True},
-            "barcode_number": {"read_only": True},
+            # "barcode_number": {"read_only": True},
             "barcode_image": {"read_only": True},
         }
 
@@ -108,9 +108,15 @@ class ProductSerializer(serializers.ModelSerializer):
         return data
 
 
+from rest_framework import serializers
+
+
 class CartSerializer(serializers.ModelSerializer):
     unit_type = serializers.ReadOnlyField(source="product.unit_type")
-    product_name = serializers.ReadOnlyField(source='product.name')
+    product_name = serializers.ReadOnlyField(source="product.name")
+    # ফ্রন্টএন্ডে স্টক দেখার জন্য এটি যোগ করলাম (অপশনাল)
+    available_stock = serializers.ReadOnlyField(source="product.stock")
+
     product_image = serializers.SerializerMethodField()
     product_price = serializers.SerializerMethodField()
     product_pv = serializers.SerializerMethodField()
@@ -127,50 +133,72 @@ class CartSerializer(serializers.ModelSerializer):
             "product_pv",
             "unit_type",
             "quantity",
+            "available_stock",  # ইউজার কতটুকু স্টক আছে তা দেখতে পারবে
             "item_subtotal",
         ]
 
+    # ✅ স্টক ভ্যালিডেশন লজিক
+    def validate(self, data):
+        """
+        মডেল চেঞ্জ না করে সিরিয়ালাইজার থেকে স্টক চেক করা
+        """
+        # ডাটা থেকে প্রোডাক্ট এবং কোয়ান্টিটি বের করা
+        product = data.get("product")
+        quantity = data.get("quantity")
+
+        # যদি এডিট (update) করা হয়, তবে ডাটাবেজে থাকা কার্ট অবজেক্ট থেকে প্রোডাক্ট নিতে হবে
+        if not product and self.instance:
+            product = self.instance.product
+
+        # স্টকের সাথে তুলনা করা
+        if product and quantity:
+            if quantity > product.stock:
+                raise serializers.ValidationError(
+                    {
+                        "quantity": f"মামা, স্টকের বেশি অর্ডার দেওয়া সম্ভব না! বর্তমানে স্টক আছে {product.stock} {product.get_unit_type_display()}."
+                    }
+                )
+
+        # কোয়ান্টিটি ০ বা তার কম কি না চেক করা
+        if quantity is not None and quantity <= 0:
+            raise serializers.ValidationError(
+                {"quantity": "মামা, অন্তত কিছু তো কিনতে হবে! পরিমাণ ০ হতে পারে না।"}
+            )
+
+        return data
+
     def get_user_status(self, request):
-        """ইউজার একটিভ কি না তা চেক করার কমন ফাংশন"""
         if not request or not request.user.is_authenticated:
             return None
-
         user = request.user
-        # ইউজার মডেল বা প্রোফাইল মডেল চেক করা
-        u_status = getattr(user, 'status', '').lower()
-        if not u_status and hasattr(user, 'profile'):
-            u_status = getattr(user.profile, 'status', '').lower()
+        u_status = getattr(user, "status", "").lower()
+        if not u_status and hasattr(user, "profile"):
+            u_status = getattr(user.profile, "status", "").lower()
         return u_status
 
     def get_product_price(self, obj):
-        request = self.context.get('request')
-        product = obj.product if hasattr(obj, 'product') else obj.get('product')
-
-        if not product: return 0
-
+        request = self.context.get("request")
+        product = obj.product if hasattr(obj, "product") else obj.get("product")
+        if not product:
+            return 0
         base_price = float(product.price)
         pv = float(product.point_value or 0)
-
-        # একটিভ মেম্বার হলে ডিসকাউন্ট (Price - PV*2)
-        if self.get_user_status(request) == 'active':
-            return base_price - (pv * 2) 
+        if self.get_user_status(request) == "active":
+            return base_price - (pv * 2)
         return base_price
 
     def get_product_pv(self, obj):
-        request = self.context.get('request')
-        product = obj.product if hasattr(obj, 'product') else obj.get('product')
-
-        if not product: return 0
-
-        # মামা, এখানে খেয়াল কর: একটিভ ইউজার কি আসলেই ০ পিভি পাবে?
-        # যদি তাই হয় তবে এই লজিক ঠিক আছে।
-        if self.get_user_status(request) == 'active':
-            return 0 
+        request = self.context.get("request")
+        product = obj.product if hasattr(obj, "product") else obj.get("product")
+        if not product:
+            return 0
+        if self.get_user_status(request) == "active":
+            return 0
         return float(product.point_value or 0)
 
     def get_item_subtotal(self, obj):
+        # আপনার বিদ্যমান লজিক
         try:
-            # ১. ডাটা এক্সট্রাকশন (Dict অথবা Object হ্যান্ডেলিং)
             if isinstance(obj, dict):
                 product_data = obj.get("product")
                 quantity = float(obj.get("quantity", 0))
@@ -178,28 +206,22 @@ class CartSerializer(serializers.ModelSerializer):
                 product_data = getattr(obj, "product", None)
                 quantity = float(getattr(obj, "quantity", 0))
 
-            # ২. প্রাইস বের করা
-            price = 0.0
-            if isinstance(product_data, dict):
-                price = float(product_data.get("price", 0))
-            elif product_data:
-                price = float(getattr(product_data, "price", 0))
-
-            # ৩. ক্যালকুলেশন
+            price = self.get_product_price(obj)  # সরাসরি এই মেথড ব্যবহার করা নিরাপদ
             return round(price * quantity, 2)
-
-        except Exception as e:
-            # যদি কোনো এরর হয় তবে ০ রিটার্ন করবে এবং কনসোলে প্রিন্ট করবে
-            print(f"DEBUG - Subtotal Error: {str(e)}")
+        except:
             return 0.0
 
     def get_product_image(self, obj):
-        request = self.context.get('request')
-        product = obj.product if hasattr(obj, 'product') else obj.get('product')
-
+        request = self.context.get("request")
+        product = obj.product if hasattr(obj, "product") else obj.get("product")
         if product and product.image:
-            return request.build_absolute_uri(product.image.url) if request else product.image.url
+            return (
+                request.build_absolute_uri(product.image.url)
+                if request
+                else product.image.url
+            )
         return None
+
 
 class BannerSerializer(serializers.ModelSerializer):
     # ইমেজ ফিল্ডকে সাধারণভাবেই রাখ যেন রিড/রাইট দুইটাই হয়
