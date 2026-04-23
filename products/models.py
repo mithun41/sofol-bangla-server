@@ -68,7 +68,7 @@ class Product(models.Model):
 
     image = models.ImageField(upload_to="products/", null=True, blank=True)
     # এখানে unique=True এবং blank=True রাখা হয়েছে
-    barcode_number = models.CharField(max_length=13, unique=True, blank=True)
+    barcode_number = models.CharField(max_length=20, unique=True, blank=True)
     barcode_image = models.ImageField(upload_to="barcodes/", blank=True, null=True)
 
     # স্ট্যাটাস ফিল্ডস
