@@ -4,16 +4,6 @@ from collections import deque
 from .models import BonusLog, User, GlobalFund, FundLog
 
 
-# --- FUND MANAGEMENT UTILITIES ---
-# accounts/services.py
-
-
-from decimal import Decimal
-
-
-from decimal import Decimal
-
-
 def distribute_money_to_funds(amount_to_distribute=4000):
     """৪০০০ টাকা নির্ধারিত ফান্ডগুলোতে ভাগ করে দেয়"""
     total_money = Decimal(str(amount_to_distribute))
@@ -300,36 +290,44 @@ def distribute_binary_matching(child_node):
 
 def calculate_commission(new_active_user):
     """
-    ইউজার এক্টিভ হওয়ার পর বাইনারি ট্রি-তে ওপরের দিকে ম্যাচিং বোনাস ডিস্ট্রিবিউট করে।
-    লজিক: ২ জন চাইল্ড এক্টিভ হলে ১ম ম্যাচিং, এরপর চাইল্ডরা ম্যাচিং পেলে আপলাইন আবার ম্যাচিং পাবে।
+    ম্যাচিং লজিক:
+    ১. নিচের দুই চাইল্ড একটিভ হলে প্যারেন্ট ৪০০ টাকা পাবে (১ম ম্যাচিং)।
+    ২. এরপর ওই চাইল্ড জোড়া যখন নিজেরা বোনাস পাবে, তখন প্যারেন্ট আবার ৪০০ পাবে।
+    ৩. রেফার বোনাস ডাবল হওয়া বন্ধ করা হয়েছে।
     """
     with transaction.atomic():
-        activation_amount = Decimal("4000.00")
         matching_bonus_amt = Decimal("400.00")
 
-        # ১. রেফারেল বোনাস (৫০০ টাকা)
+        # ১. রেফারেল বোনাস (ডুপ্লিকেট চেকসহ)
         referrer = new_active_user.referred_by
         if referrer and referrer.status == "active":
-            ref_bonus = activation_amount * Decimal("0.125")
-            if deduct_from_fund("referral_fund", ref_bonus):
-                referrer.balance += ref_bonus
-                referrer.referral_bonus += ref_bonus
-                referrer.save()
-                BonusLog.objects.create(
-                    user=referrer,
-                    amount=ref_bonus,
-                    reason=f"Referral Bonus: {new_active_user.username}",
-                )
+            # চেক: এই নতুন ইউজারের জন্য অলরেডি রেফার বোনাস দেওয়া হয়েছে কি না
+            if not BonusLog.objects.filter(
+                user=referrer,
+                reason__contains=f"Referral Bonus: {new_active_user.username}",
+            ).exists():
+                ref_bonus = Decimal("500.00")
+                if deduct_from_fund("referral_fund", ref_bonus):
+                    referrer.balance = Decimal(str(referrer.balance)) + ref_bonus
+                    referrer.referral_bonus = (
+                        Decimal(str(referrer.referral_bonus)) + ref_bonus
+                    )
+                    referrer.save()
+                    BonusLog.objects.create(
+                        user=referrer,
+                        amount=ref_bonus,
+                        reason=f"Referral Bonus: {new_active_user.username}",
+                    )
 
         # ২. বাইনারি ম্যাচিং লজিক
         child_node = new_active_user
         parent = new_active_user.placement_under
 
         while parent:
-            # ডাটাবেজ থেকে লেটেস্ট প্যারেন্ট ডাটা লক করে আনা
+            # প্যারেন্ট লক করে আনা
             parent = User.objects.select_for_update().get(pk=parent.pk)
 
-            # কাউন্ট আপডেট (Active মেম্বার হিসেবে)
+            # পজিশন অনুযায়ী কাউন্ট বাড়ানো
             if child_node.position == "left":
                 parent.left_count += 1
                 parent.total_left += 1
@@ -337,9 +335,8 @@ def calculate_commission(new_active_user):
                 parent.right_count += 1
                 parent.total_right += 1
 
-            # ম্যাচিং চেক (যদি প্যারেন্ট একটিভ থাকে)
+            # ম্যাচিং বোনাস চেক (প্যারেন্ট একটিভ থাকলেই কেবল পাবে)
             if parent.status == "active":
-                # বাম ও ডানের চাইল্ড অবজেক্ট আনা
                 left_child = User.objects.filter(
                     placement_under=parent, position="left"
                 ).first()
@@ -347,30 +344,33 @@ def calculate_commission(new_active_user):
                     placement_under=parent, position="right"
                 ).first()
 
+                # শর্ত: দুই পাশে চাইল্ড থাকতে হবে এবং দুজনকেই একটিভ হতে হবে
                 if (
                     left_child
                     and right_child
                     and left_child.status == "active"
                     and right_child.status == "active"
                 ):
-                    # --- স্পেশাল লজিক ---
-                    # চাইল্ডরা নিজেরা কয়টা ম্যাচিং খেয়েছে (paid_matches) + তারা নিজেরা এক্টিভ কি না (+1)
-                    # এটা নিশ্চিত করে যে চাইল্ডরা বোনাস পেলে আপলাইন আবার বোনাস পাবে।
+
+                    # লজিক: চাইল্ডদের নিজের পাওয়া ম্যাচিং (paid_matches) + তাদের নিজেদের অস্তিত্ব (1)
+                    # এই দুইটার মধ্যে যেটা কমন (min), সেটাই প্যারেন্টের বর্তমান ম্যাচিং হওয়ার যোগ্যতা
                     eligible_left = 1 + left_child.paid_matches
                     eligible_right = 1 + right_child.paid_matches
 
                     total_potential_matches = min(eligible_left, eligible_right)
 
-                    # যদি নতুন কোনো ম্যাচিং তৈরি হয়
+                    # যদি পটেনশিয়াল ম্যাচিং আগের পেইড ম্যাচিং থেকে বেশি হয়
                     if total_potential_matches > parent.paid_matches:
                         new_pairs = total_potential_matches - parent.paid_matches
                         total_bonus = new_pairs * matching_bonus_amt
 
                         if deduct_from_fund("matching_fund", total_bonus):
-                            parent.balance += total_bonus
-                            parent.matching_bonus += total_bonus
+                            parent.balance = Decimal(str(parent.balance)) + total_bonus
+                            parent.matching_bonus = (
+                                Decimal(str(parent.matching_bonus)) + total_bonus
+                            )
                             parent.paid_matches = (
-                                total_potential_matches  # ম্যাচিং কাউন্ট আপডেট
+                                total_potential_matches  # আপডেট পেইড কাউন্ট
                             )
 
                             BonusLog.objects.create(
@@ -378,14 +378,13 @@ def calculate_commission(new_active_user):
                                 amount=total_bonus,
                                 reason=f"Recursive Matching Bonus ({new_pairs} pair)",
                             )
-                            # লিডারশিপ বোনাস পাঠানো
+                            # লিডারশিপ বোনাস
                             distribute_leadership_bonus(parent, total_bonus)
 
-            # র‍্যাঙ্ক এবং সেভ
             update_user_rank(parent)
             parent.save()
 
-            # উপরে উঠার লজিক
+            # ট্রি-তে উপরে উঠা
             child_node = parent
             parent = parent.placement_under
 
