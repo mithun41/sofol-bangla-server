@@ -4,7 +4,7 @@ from collections import deque
 from .models import BonusLog, User, GlobalFund, FundLog
 
 
-def distribute_money_to_funds(amount_to_distribute=4000):
+def distribute_money_to_funds(amount_to_distribute=4000, **kwargs):
     """৪০০০ টাকা নির্ধারিত ফান্ডগুলোতে ভাগ করে দেয়"""
     total_money = Decimal(str(amount_to_distribute))
 
@@ -213,8 +213,6 @@ def update_user_rank(user):
             if level in star_bonuses:
                 bonus = Decimal(str(star_bonuses[level]))
 
-                # এখানে deduct_from_fund ফাংশনটি কল হচ্ছে
-                from .services import deduct_from_fund  # যদি প্রয়োজন হয়
 
                 if deduct_from_fund("rank_reward_fund", bonus):
                     user.balance += bonus
@@ -290,7 +288,7 @@ def distribute_binary_matching(child_node):
 
 def calculate_commission(new_active_user):
     """
-    ম্যাচিং লজিক:
+    ম্যাচিং লজিক: 
     ১. নিচের দুই চাইল্ড একটিভ হলে প্যারেন্ট ৪০০ টাকা পাবে (১ম ম্যাচিং)।
     ২. এরপর ওই চাইল্ড জোড়া যখন নিজেরা বোনাস পাবে, তখন প্যারেন্ট আবার ৪০০ পাবে।
     ৩. রেফার বোনাস ডাবল হওয়া বন্ধ করা হয়েছে।
@@ -302,16 +300,11 @@ def calculate_commission(new_active_user):
         referrer = new_active_user.referred_by
         if referrer and referrer.status == "active":
             # চেক: এই নতুন ইউজারের জন্য অলরেডি রেফার বোনাস দেওয়া হয়েছে কি না
-            if not BonusLog.objects.filter(
-                user=referrer,
-                reason__contains=f"Referral Bonus: {new_active_user.username}",
-            ).exists():
+            if not BonusLog.objects.filter(user=referrer, reason__contains=f"Referral Bonus: {new_active_user.username}").exists():
                 ref_bonus = Decimal("500.00")
                 if deduct_from_fund("referral_fund", ref_bonus):
                     referrer.balance = Decimal(str(referrer.balance)) + ref_bonus
-                    referrer.referral_bonus = (
-                        Decimal(str(referrer.referral_bonus)) + ref_bonus
-                    )
+                    referrer.referral_bonus = Decimal(str(referrer.referral_bonus)) + ref_bonus
                     referrer.save()
                     BonusLog.objects.create(
                         user=referrer,
@@ -337,26 +330,17 @@ def calculate_commission(new_active_user):
 
             # ম্যাচিং বোনাস চেক (প্যারেন্ট একটিভ থাকলেই কেবল পাবে)
             if parent.status == "active":
-                left_child = User.objects.filter(
-                    placement_under=parent, position="left"
-                ).first()
-                right_child = User.objects.filter(
-                    placement_under=parent, position="right"
-                ).first()
+                left_child = User.objects.filter(placement_under=parent, position="left").first()
+                right_child = User.objects.filter(placement_under=parent, position="right").first()
 
                 # শর্ত: দুই পাশে চাইল্ড থাকতে হবে এবং দুজনকেই একটিভ হতে হবে
-                if (
-                    left_child
-                    and right_child
-                    and left_child.status == "active"
-                    and right_child.status == "active"
-                ):
-
+                if left_child and right_child and left_child.status == "active" and right_child.status == "active":
+                    
                     # লজিক: চাইল্ডদের নিজের পাওয়া ম্যাচিং (paid_matches) + তাদের নিজেদের অস্তিত্ব (1)
                     # এই দুইটার মধ্যে যেটা কমন (min), সেটাই প্যারেন্টের বর্তমান ম্যাচিং হওয়ার যোগ্যতা
                     eligible_left = 1 + left_child.paid_matches
                     eligible_right = 1 + right_child.paid_matches
-
+                    
                     total_potential_matches = min(eligible_left, eligible_right)
 
                     # যদি পটেনশিয়াল ম্যাচিং আগের পেইড ম্যাচিং থেকে বেশি হয়
@@ -366,13 +350,9 @@ def calculate_commission(new_active_user):
 
                         if deduct_from_fund("matching_fund", total_bonus):
                             parent.balance = Decimal(str(parent.balance)) + total_bonus
-                            parent.matching_bonus = (
-                                Decimal(str(parent.matching_bonus)) + total_bonus
-                            )
-                            parent.paid_matches = (
-                                total_potential_matches  # আপডেট পেইড কাউন্ট
-                            )
-
+                            parent.matching_bonus = Decimal(str(parent.matching_bonus)) + total_bonus
+                            parent.paid_matches = total_potential_matches # আপডেট পেইড কাউন্ট
+                            
                             BonusLog.objects.create(
                                 user=parent,
                                 amount=total_bonus,
