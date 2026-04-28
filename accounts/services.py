@@ -6,18 +6,13 @@ from .models import BonusLog, User, GlobalFund, FundLog
 
 def distribute_money_to_funds(amount_to_distribute=4000, *args, **kwargs):
     """৪০০০ টাকা নির্ধারিত ফান্ডগুলোতে ভাগ করে দেয়"""
-
-    # ইনপুট ভ্যালু চেক করা যাতে খালি বা ভুল কিছু না আসে
-    try:
-        total_money = Decimal(str(amount_to_distribute or "0.00"))
-    except Exception:
-        total_money = Decimal("0.00")
+    total_money = Decimal(str(amount_to_distribute or "0.00"))
 
     with transaction.atomic():
         # ফান্ড অবজেক্ট লক করে আনা (ID 1 নিশ্চিত করা)
         fund, _ = GlobalFund.objects.select_for_update().get_or_create(id=1)
 
-        # নির্ধারিত অ্যামাউন্টগুলো (সব Decimal এ)
+        # নির্ধারিত অ্যামাউন্ট
         ref_amt = Decimal("500.00")
         match_amt = Decimal("400.00")
         rank_amt = Decimal("500.00")
@@ -25,22 +20,13 @@ def distribute_money_to_funds(amount_to_distribute=4000, *args, **kwargs):
         lead_amt = Decimal("500.00")
         comp_amt = Decimal("1100.00")
 
-        # ডাটাবেজ ফিল্ড None থাকলে বা এরর দিলে সেটাকে "0.00" ধরে হিসাব করা
-        # প্রতিটি ফিল্ডের জন্য আলাদাভাবে ট্রাই-এক্সেপ্ট দেওয়া হলো যাতে ১টা এরর হলে সব বন্ধ না হয়
-        def get_safe_decimal(val):
-            try:
-                if val is None or str(val).strip() == "" or str(val) == "None":
-                    return Decimal("0.00")
-                return Decimal(str(val))
-            except:
-                return Decimal("0.00")
-
-        fund.referral_fund = get_safe_decimal(fund.referral_fund) + ref_amt
-        fund.matching_fund = get_safe_decimal(fund.matching_fund) + match_amt
-        fund.rank_reward_fund = get_safe_decimal(fund.rank_reward_fund) + rank_amt
-        fund.tour_fund = get_safe_decimal(fund.tour_fund) + tour_amt
-        fund.leadership_fund = get_safe_decimal(fund.leadership_fund) + lead_amt
-        fund.company_fund = get_safe_decimal(fund.company_fund) + comp_amt
+        # ডাটাবেজ ফিল্ড None থাকলে সেটাকে "0.00" ধরে হিসাব করা (Fixes ConversionSyntax Error)
+        fund.referral_fund = Decimal(str(fund.referral_fund or "0.00")) + ref_amt
+        fund.matching_fund = Decimal(str(fund.matching_fund or "0.00")) + match_amt
+        fund.rank_reward_fund = Decimal(str(fund.rank_reward_fund or "0.00")) + rank_amt
+        fund.tour_fund = Decimal(str(fund.tour_fund or "0.00")) + tour_amt
+        fund.leadership_fund = Decimal(str(fund.leadership_fund or "0.00")) + lead_amt
+        fund.company_fund = Decimal(str(fund.company_fund or "0.00")) + comp_amt
 
         fund.save()
 
@@ -49,10 +35,8 @@ def distribute_money_to_funds(amount_to_distribute=4000, *args, **kwargs):
             fund_type="Global",
             amount=total_money,
             transaction_type="inbound",
-            reason=f"Fixed 4000 TK Distribution: Ref 500, Match 400, Rank 500, Tour 1000, Lead 500, Comp 1100",
+            reason="Fixed 4000 TK Distribution: Ref 500, Match 400, Rank 500, Tour 1000, Lead 500, Comp 1100",
         )
-        print("SUCCESS: Global funds updated successfully.")
-
     return True
 
 
@@ -80,64 +64,40 @@ def add_bonus_to_user(user, amount, bonus_type):
 
 
 def deduct_from_fund(primary_fund_name, amount):
-    """
-    ফান্ড থেকে টাকা কাটার আপডেট ফাংশন।
-    এটি নিশ্চিত করে যে ডাটাবেজ থেকে লেটেস্ট ভ্যালু নিয়ে চেক করা হচ্ছে।
-    """
-    amount = Decimal(str(amount))
+    fund, _ = GlobalFund.objects.get_or_create(id=1)
+    primary_balance = getattr(fund, primary_fund_name)
+    company_balance = fund.company_fund
+    amount = Decimal(amount)
 
     with transaction.atomic():
-        # ১. লকসহ লেটেস্ট ফান্ড ডাটা নিয়ে আসা
-        fund, _ = GlobalFund.objects.select_for_update().get_or_create(id=1)
-
-        # ২. সেফলি ব্যালেন্স রিড করা (None হ্যান্ডেলিং)
-        primary_balance = Decimal(str(getattr(fund, primary_fund_name) or "0.00"))
-        company_balance = Decimal(str(fund.company_fund or "0.00"))
-
-        # ৩. মেইন ব্যালেন্স চেক
         if primary_balance >= amount:
             setattr(fund, primary_fund_name, primary_balance - amount)
-            fund.save()  # সেভ করা জরুরি
-
             FundLog.objects.create(
                 fund_type=primary_fund_name,
                 amount=amount,
                 transaction_type="outbound",
-                reason=f"Bonus distribution ({primary_fund_name})",
+                reason="Bonus distribution",
             )
-            return True
-
-        # ৪. কোম্পানি ফান্ড থেকে ব্যাকআপ চেক
         elif (primary_balance + company_balance) >= amount:
             remaining = amount - primary_balance
-
-            setattr(fund, primary_fund_name, Decimal("0.00"))
-            fund.company_fund = company_balance - remaining
-            fund.save()  # সেভ করা জরুরি
-
-            # আলাদা আলাদা লগ রাখা
-            if primary_balance > 0:
-                FundLog.objects.create(
-                    fund_type=primary_fund_name,
-                    amount=primary_balance,
-                    transaction_type="outbound",
-                    reason="Partial bonus from primary fund",
-                )
-
+            setattr(fund, primary_fund_name, 0)
+            fund.company_fund -= remaining
+            FundLog.objects.create(
+                fund_type=primary_fund_name,
+                amount=primary_balance,
+                transaction_type="outbound",
+                reason="Partial bonus",
+            )
             FundLog.objects.create(
                 fund_type="company_fund",
                 amount=remaining,
                 transaction_type="outbound",
-                reason=f"Bonus backup support for {primary_fund_name}",
+                reason="Bonus backup support",
             )
-            return True
-
-        # ৫. পর্যাপ্ত টাকা না থাকলে
         else:
-            print(
-                f"CRITICAL: Insufficient funds in {primary_fund_name} and company_fund!"
-            )
             return False
+        fund.save()
+        return True
 
 
 # --- LEADERSHIP BONUS LOGIC (NEW) ---
@@ -327,54 +287,48 @@ def distribute_binary_matching(child_node):
 def calculate_commission(new_active_user):
     """
     ম্যাচিং লজিক:
-    ১. রেফারেল বোনাস (সেভ ফিক্সড)
-    ২. বাইনারি ম্যাচিং লজিক (রিকার্সিভ)
-    ৩. অটোমেটিক র‍্যাঙ্ক আপডেট এবং সেভ
+    ১. নিচের দুই চাইল্ড একটিভ হলে প্যারেন্ট ৪০০ টাকা পাবে (১ম ম্যাচিং)।
+    ২. এরপর ওই চাইল্ড জোড়া যখন নিজেরা বোনাস পাবে, তখন প্যারেন্ট আবার ৪০০ পাবে।
+    ৩. রেফার বোনাস ডাবল হওয়া বন্ধ করা হয়েছে।
     """
     with transaction.atomic():
         matching_bonus_amt = Decimal("400.00")
 
         # ১. রেফারেল বোনাস (ডুপ্লিকেট চেকসহ)
         referrer = new_active_user.referred_by
-        # status চেক করার সময় lower() এবং strip() করা নিরাপদ
-        if referrer and str(referrer.status).lower().strip() == "active":
+        if referrer and referrer.status == "active":
+            print("Referral Bonus Start")
             # চেক: এই নতুন ইউজারের জন্য অলরেডি রেফার বোনাস দেওয়া হয়েছে কি না
             if not BonusLog.objects.filter(
                 user=referrer,
                 reason__contains=f"Referral Bonus: {new_active_user.username}",
             ).exists():
+                print("Matching Bonus Start")
                 ref_bonus = Decimal("500.00")
-
-                # ফান্ড থেকে টাকা কমানো
                 if deduct_from_fund("referral_fund", ref_bonus):
-                    # ডাটাবেজ থেকে লেটেস্ট ব্যালেন্স নিয়ে আসা এবং সেফলি যোগ করা
-                    referrer.balance = (
-                        Decimal(str(referrer.balance or "0.00")) + ref_bonus
-                    )
+                    print("Matching Bonus Start")
+                    referrer.balance = Decimal(str(referrer.balance)) + ref_bonus
                     referrer.referral_bonus = (
-                        Decimal(str(referrer.referral_bonus or "0.00")) + ref_bonus
+                        Decimal(str(referrer.referral_bonus)) + ref_bonus
                     )
-
-                    # গুরুত্বপূর্ণ: রেফারারকে অবশ্যই সেভ করতে হবে
                     referrer.save()
-
                     BonusLog.objects.create(
                         user=referrer,
                         amount=ref_bonus,
                         reason=f"Referral Bonus: {new_active_user.username}",
                     )
-                    print(f"SUCCESS: Referral bonus added to {referrer.username}")
 
         # ২. বাইনারি ম্যাচিং লজিক
         child_node = new_active_user
         parent = new_active_user.placement_under
 
         while parent:
-            # প্যারেন্ট লক করে আনা (Race condition এড়াতে)
+            # প্যারেন্ট লক করে আনা
             parent = User.objects.select_for_update().get(pk=parent.pk)
 
             # পজিশন অনুযায়ী কাউন্ট বাড়ানো
             if child_node.position == "left":
+                print("Matching Bonus Start")
                 parent.left_count += 1
                 parent.total_left += 1
             else:
@@ -382,7 +336,8 @@ def calculate_commission(new_active_user):
                 parent.total_right += 1
 
             # ম্যাচিং বোনাস চেক (প্যারেন্ট একটিভ থাকলেই কেবল পাবে)
-            if str(parent.status).lower().strip() == "active":
+            if parent.status == "active":
+                print("Matching Bonus Start")
                 left_child = User.objects.filter(
                     placement_under=parent, position="left"
                 ).first()
@@ -394,61 +349,47 @@ def calculate_commission(new_active_user):
                 if (
                     left_child
                     and right_child
-                    and str(left_child.status).lower().strip() == "active"
-                    and str(right_child.status).lower().strip() == "active"
+                    and left_child.status == "active"
+                    and right_child.status == "active"
                 ):
-
-                    # লজিক: চাইল্ডদের নিজের পাওয়া ম্যাচিং + নিজেদের অস্তিত্ব (১)
-                    eligible_left = 1 + (left_child.paid_matches or 0)
-                    eligible_right = 1 + (right_child.paid_matches or 0)
+                    print("Matching Bonus Start")
+                    # লজিক: চাইল্ডদের নিজের পাওয়া ম্যাচিং (paid_matches) + তাদের নিজেদের অস্তিত্ব (1)
+                    # এই দুইটার মধ্যে যেটা কমন (min), সেটাই প্যারেন্টের বর্তমান ম্যাচিং হওয়ার যোগ্যতা
+                    eligible_left = 1 + left_child.paid_matches
+                    eligible_right = 1 + right_child.paid_matches
 
                     total_potential_matches = min(eligible_left, eligible_right)
 
                     # যদি পটেনশিয়াল ম্যাচিং আগের পেইড ম্যাচিং থেকে বেশি হয়
-                    if total_potential_matches > (parent.paid_matches or 0):
-                        new_pairs = total_potential_matches - (parent.paid_matches or 0)
+                    if total_potential_matches > parent.paid_matches:
+                        print("Matching Bonus Start")
+                        new_pairs = total_potential_matches - parent.paid_matches
                         total_bonus = new_pairs * matching_bonus_amt
 
                         if deduct_from_fund("matching_fund", total_bonus):
-                            parent.balance = (
-                                Decimal(str(parent.balance or "0.00")) + total_bonus
-                            )
+                            print("Matching Bonus Start")
+                            parent.balance = Decimal(str(parent.balance)) + total_bonus
                             parent.matching_bonus = (
-                                Decimal(str(parent.matching_bonus or "0.00"))
-                                + total_bonus
+                                Decimal(str(parent.matching_bonus)) + total_bonus
                             )
                             parent.paid_matches = (
                                 total_potential_matches  # আপডেট পেইড কাউন্ট
                             )
-
-                            # বোনাস পাওয়ার সাথে সাথেই সেভ করা নিরাপদ
-                            parent.save()
 
                             BonusLog.objects.create(
                                 user=parent,
                                 amount=total_bonus,
                                 reason=f"Recursive Matching Bonus ({new_pairs} pair)",
                             )
-
                             # লিডারশিপ বোনাস
-                            try:
-                                distribute_leadership_bonus(parent, total_bonus)
-                            except Exception as e:
-                                print(f"Leadership Bonus Error: {e}")
+                            distribute_leadership_bonus(parent, total_bonus)
 
-            # র‍্যাঙ্ক আপডেট এবং ফাইনাল সেভ
-            try:
-                update_user_rank(parent)
-            except Exception as e:
-                print(f"Rank Update Error for {parent.username}: {e}")
-
+            update_user_rank(parent)
             parent.save()
 
             # ট্রি-তে উপরে উঠা
             child_node = parent
             parent = parent.placement_under
-
-    return True
 
 
 def calculate_and_apply_order_benefits(order):
