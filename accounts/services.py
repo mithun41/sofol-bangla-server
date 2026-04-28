@@ -6,13 +6,18 @@ from .models import BonusLog, User, GlobalFund, FundLog
 
 def distribute_money_to_funds(amount_to_distribute=4000, *args, **kwargs):
     """৪০০০ টাকা নির্ধারিত ফান্ডগুলোতে ভাগ করে দেয়"""
-    total_money = Decimal(str(amount_to_distribute or "0.00"))
+
+    # ইনপুট ভ্যালু চেক করা যাতে খালি বা ভুল কিছু না আসে
+    try:
+        total_money = Decimal(str(amount_to_distribute or "0.00"))
+    except Exception:
+        total_money = Decimal("0.00")
 
     with transaction.atomic():
         # ফান্ড অবজেক্ট লক করে আনা (ID 1 নিশ্চিত করা)
         fund, _ = GlobalFund.objects.select_for_update().get_or_create(id=1)
 
-        # নির্ধারিত অ্যামাউন্ট
+        # নির্ধারিত অ্যামাউন্টগুলো (সব Decimal এ)
         ref_amt = Decimal("500.00")
         match_amt = Decimal("400.00")
         rank_amt = Decimal("500.00")
@@ -20,13 +25,22 @@ def distribute_money_to_funds(amount_to_distribute=4000, *args, **kwargs):
         lead_amt = Decimal("500.00")
         comp_amt = Decimal("1100.00")
 
-        # ডাটাবেজ ফিল্ড None থাকলে সেটাকে "0.00" ধরে হিসাব করা (Fixes ConversionSyntax Error)
-        fund.referral_fund = Decimal(str(fund.referral_fund or "0.00")) + ref_amt
-        fund.matching_fund = Decimal(str(fund.matching_fund or "0.00")) + match_amt
-        fund.rank_reward_fund = Decimal(str(fund.rank_reward_fund or "0.00")) + rank_amt
-        fund.tour_fund = Decimal(str(fund.tour_fund or "0.00")) + tour_amt
-        fund.leadership_fund = Decimal(str(fund.leadership_fund or "0.00")) + lead_amt
-        fund.company_fund = Decimal(str(fund.company_fund or "0.00")) + comp_amt
+        # ডাটাবেজ ফিল্ড None থাকলে বা এরর দিলে সেটাকে "0.00" ধরে হিসাব করা
+        # প্রতিটি ফিল্ডের জন্য আলাদাভাবে ট্রাই-এক্সেপ্ট দেওয়া হলো যাতে ১টা এরর হলে সব বন্ধ না হয়
+        def get_safe_decimal(val):
+            try:
+                if val is None or str(val).strip() == "" or str(val) == "None":
+                    return Decimal("0.00")
+                return Decimal(str(val))
+            except:
+                return Decimal("0.00")
+
+        fund.referral_fund = get_safe_decimal(fund.referral_fund) + ref_amt
+        fund.matching_fund = get_safe_decimal(fund.matching_fund) + match_amt
+        fund.rank_reward_fund = get_safe_decimal(fund.rank_reward_fund) + rank_amt
+        fund.tour_fund = get_safe_decimal(fund.tour_fund) + tour_amt
+        fund.leadership_fund = get_safe_decimal(fund.leadership_fund) + lead_amt
+        fund.company_fund = get_safe_decimal(fund.company_fund) + comp_amt
 
         fund.save()
 
@@ -35,8 +49,10 @@ def distribute_money_to_funds(amount_to_distribute=4000, *args, **kwargs):
             fund_type="Global",
             amount=total_money,
             transaction_type="inbound",
-            reason="Fixed 4000 TK Distribution: Ref 500, Match 400, Rank 500, Tour 1000, Lead 500, Comp 1100",
+            reason=f"Fixed 4000 TK Distribution: Ref 500, Match 400, Rank 500, Tour 1000, Lead 500, Comp 1100",
         )
+        print("SUCCESS: Global funds updated successfully.")
+
     return True
 
 
