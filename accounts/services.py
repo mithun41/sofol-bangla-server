@@ -80,40 +80,64 @@ def add_bonus_to_user(user, amount, bonus_type):
 
 
 def deduct_from_fund(primary_fund_name, amount):
-    fund, _ = GlobalFund.objects.get_or_create(id=1)
-    primary_balance = getattr(fund, primary_fund_name)
-    company_balance = fund.company_fund
-    amount = Decimal(amount)
+    """
+    ফান্ড থেকে টাকা কাটার আপডেট ফাংশন।
+    এটি নিশ্চিত করে যে ডাটাবেজ থেকে লেটেস্ট ভ্যালু নিয়ে চেক করা হচ্ছে।
+    """
+    amount = Decimal(str(amount))
 
     with transaction.atomic():
+        # ১. লকসহ লেটেস্ট ফান্ড ডাটা নিয়ে আসা
+        fund, _ = GlobalFund.objects.select_for_update().get_or_create(id=1)
+
+        # ২. সেফলি ব্যালেন্স রিড করা (None হ্যান্ডেলিং)
+        primary_balance = Decimal(str(getattr(fund, primary_fund_name) or "0.00"))
+        company_balance = Decimal(str(fund.company_fund or "0.00"))
+
+        # ৩. মেইন ব্যালেন্স চেক
         if primary_balance >= amount:
             setattr(fund, primary_fund_name, primary_balance - amount)
+            fund.save()  # সেভ করা জরুরি
+
             FundLog.objects.create(
                 fund_type=primary_fund_name,
                 amount=amount,
                 transaction_type="outbound",
-                reason="Bonus distribution",
+                reason=f"Bonus distribution ({primary_fund_name})",
             )
+            return True
+
+        # ৪. কোম্পানি ফান্ড থেকে ব্যাকআপ চেক
         elif (primary_balance + company_balance) >= amount:
             remaining = amount - primary_balance
-            setattr(fund, primary_fund_name, 0)
-            fund.company_fund -= remaining
-            FundLog.objects.create(
-                fund_type=primary_fund_name,
-                amount=primary_balance,
-                transaction_type="outbound",
-                reason="Partial bonus",
-            )
+
+            setattr(fund, primary_fund_name, Decimal("0.00"))
+            fund.company_fund = company_balance - remaining
+            fund.save()  # সেভ করা জরুরি
+
+            # আলাদা আলাদা লগ রাখা
+            if primary_balance > 0:
+                FundLog.objects.create(
+                    fund_type=primary_fund_name,
+                    amount=primary_balance,
+                    transaction_type="outbound",
+                    reason="Partial bonus from primary fund",
+                )
+
             FundLog.objects.create(
                 fund_type="company_fund",
                 amount=remaining,
                 transaction_type="outbound",
-                reason="Bonus backup support",
+                reason=f"Bonus backup support for {primary_fund_name}",
             )
+            return True
+
+        # ৫. পর্যাপ্ত টাকা না থাকলে
         else:
+            print(
+                f"CRITICAL: Insufficient funds in {primary_fund_name} and company_fund!"
+            )
             return False
-        fund.save()
-        return True
 
 
 # --- LEADERSHIP BONUS LOGIC (NEW) ---
