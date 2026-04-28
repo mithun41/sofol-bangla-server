@@ -299,10 +299,13 @@ def calculate_commission(new_active_user):
         # ১. রেফারেল বোনাস (ডুপ্লিকেট চেকসহ)
         referrer = new_active_user.referred_by
         if referrer and referrer.status == "active":
+            print("Referral Bonus Start")
             # চেক: এই নতুন ইউজারের জন্য অলরেডি রেফার বোনাস দেওয়া হয়েছে কি না
             if not BonusLog.objects.filter(user=referrer, reason__contains=f"Referral Bonus: {new_active_user.username}").exists():
+                print("Matching Bonus Start")
                 ref_bonus = Decimal("500.00")
                 if deduct_from_fund("referral_fund", ref_bonus):
+                    print("Matching Bonus Start")
                     referrer.balance = Decimal(str(referrer.balance)) + ref_bonus
                     referrer.referral_bonus = Decimal(str(referrer.referral_bonus)) + ref_bonus
                     referrer.save()
@@ -322,6 +325,7 @@ def calculate_commission(new_active_user):
 
             # পজিশন অনুযায়ী কাউন্ট বাড়ানো
             if child_node.position == "left":
+                print("Matching Bonus Start")
                 parent.left_count += 1
                 parent.total_left += 1
             else:
@@ -330,29 +334,32 @@ def calculate_commission(new_active_user):
 
             # ম্যাচিং বোনাস চেক (প্যারেন্ট একটিভ থাকলেই কেবল পাবে)
             if parent.status == "active":
+                print("Matching Bonus Start")
                 left_child = User.objects.filter(placement_under=parent, position="left").first()
                 right_child = User.objects.filter(placement_under=parent, position="right").first()
 
                 # শর্ত: দুই পাশে চাইল্ড থাকতে হবে এবং দুজনকেই একটিভ হতে হবে
                 if left_child and right_child and left_child.status == "active" and right_child.status == "active":
-                    
+                    print("Matching Bonus Start")
                     # লজিক: চাইল্ডদের নিজের পাওয়া ম্যাচিং (paid_matches) + তাদের নিজেদের অস্তিত্ব (1)
                     # এই দুইটার মধ্যে যেটা কমন (min), সেটাই প্যারেন্টের বর্তমান ম্যাচিং হওয়ার যোগ্যতা
                     eligible_left = 1 + left_child.paid_matches
                     eligible_right = 1 + right_child.paid_matches
-                    
+
                     total_potential_matches = min(eligible_left, eligible_right)
 
                     # যদি পটেনশিয়াল ম্যাচিং আগের পেইড ম্যাচিং থেকে বেশি হয়
                     if total_potential_matches > parent.paid_matches:
+                        print("Matching Bonus Start")
                         new_pairs = total_potential_matches - parent.paid_matches
                         total_bonus = new_pairs * matching_bonus_amt
 
                         if deduct_from_fund("matching_fund", total_bonus):
+                            print("Matching Bonus Start")
                             parent.balance = Decimal(str(parent.balance)) + total_bonus
                             parent.matching_bonus = Decimal(str(parent.matching_bonus)) + total_bonus
                             parent.paid_matches = total_potential_matches # আপডেট পেইড কাউন্ট
-                            
+
                             BonusLog.objects.create(
                                 user=parent,
                                 amount=total_bonus,
