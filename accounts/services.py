@@ -31,12 +31,45 @@ def distribute_money_to_funds(amount_to_distribute=4000, *args, **kwargs):
         fund.save()
 
         # হিসেবের জন্য লগ রাখা
-        FundLog.objects.create(
-            fund_type="Global",
-            amount=total_money,
-            transaction_type="inbound",
-            reason="Fixed 4000 TK Distribution: Ref 500, Match 400, Rank 500, Tour 1000, Lead 500, Comp 1100",
-        )
+        logs = [
+            FundLog(
+                fund_type="referral_fund",
+                amount=Decimal("500.00"),
+                transaction_type="inbound",
+                reason="Activation: Referral Fund share",
+            ),
+            FundLog(
+                fund_type="matching_fund",
+                amount=Decimal("400.00"),
+                transaction_type="inbound",
+                reason="Activation: Matching Fund share",
+            ),
+            FundLog(
+                fund_type="rank_reward_fund",
+                amount=Decimal("500.00"),
+                transaction_type="inbound",
+                reason="Activation: Rank Reward Fund share",
+            ),
+            FundLog(
+                fund_type="tour_fund",
+                amount=Decimal("1000.00"),
+                transaction_type="inbound",
+                reason="Activation: Tour Fund share",
+            ),
+            FundLog(
+                fund_type="leadership_fund",
+                amount=Decimal("500.00"),
+                transaction_type="inbound",
+                reason="Activation: Leadership Fund share",
+            ),
+            FundLog(
+                fund_type="company_fund",
+                amount=Decimal("1100.00"),
+                transaction_type="inbound",
+                reason="Activation: Company Fund share",
+            ),
+        ]
+        FundLog.objects.bulk_create(logs)
     return True
 
 
@@ -220,9 +253,22 @@ def update_user_rank(user):
                     # --- এই অংশটুকু খেয়াল করুন ---
                     # আপনার মডেলে 'bonus_type' নেই, তাই শুধু 'reason' ব্যবহার করছি
                     BonusLog.objects.create(
-                        user=user, amount=bonus, reason=f"Rank Reward: {level} Star"
+                        user=user,
+                        amount=bonus,
+                        reason=f"Rank Reward: {level} Star - {STAR_TITLES[level]}",
                     )
         user.save()
+        STAR_TITLES = {
+            0: "Member",
+            1: "Member",
+            2: "Member",
+            3: "Member",
+            4: "Leader",
+            5: "Sales Officer",
+            6: "Sr. Sales Officer",
+            7: "Incharge",
+            8: "Manager",
+        }
 
 
 def distribute_binary_matching(child_node):
