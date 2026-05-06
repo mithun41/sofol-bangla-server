@@ -12,6 +12,7 @@ from rest_framework import generics, permissions, status
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated, IsAdminUser
+from rest_framework_simplejwt.authentication import JWTAuthentication
 
 from products.models import Product 
 from .models import Order, OrderItem
@@ -144,8 +145,22 @@ class UserOrderListView(generics.ListAPIView):
     serializer_class = OrderSerializer
     permission_classes = [IsAuthenticated]
 
+
     def get_queryset(self):
         return Order.objects.filter(user=self.request.user).order_by("-created_at")
+# orders/views.py এ যোগ করো
+class AdminOrderDelete(APIView):
+    
+    permission_classes = [IsAuthenticated]  # তোমার existing permission class
+
+    def delete(self, request, pk):
+        try:
+            order = Order.objects.get(pk=pk)
+            order.delete()
+            return Response({"success": True}, status=status.HTTP_204_NO_CONTENT)
+        except Order.DoesNotExist:
+            return Response({"error": "Order not found"}, status=404)
+
 
 # --- ৩. ড্যাশবোর্ড রিপোর্ট ভিউগুলো ---
 

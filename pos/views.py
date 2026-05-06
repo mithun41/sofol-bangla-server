@@ -119,8 +119,8 @@ class POSOrderCreate(APIView):
                     total_pv += (final_pv * qty)
 
                     # স্টক আপডেট
-                    product.stock -= int(qty)
-                    product.save()
+                    # product.stock -= int(qty)
+                    # product.save()
 
                     order_items_data.append({
                         'product_id': product.id,

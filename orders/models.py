@@ -81,6 +81,23 @@ class Order(models.Model):
                         else:
                             product.stock += qty
                         product.save()
+                    
+        if old_status == "Cancelled" and self.status != "Cancelled":
+            from products.models import Product
+            with transaction.atomic():
+                for item in self.items.all():
+                  product = (
+                Product.objects.select_for_update()
+                .filter(id=item.product_id)
+                .first()
+            )
+            if product:
+                qty = Decimal(str(item.quantity))
+                if product.unit_type == "gram":
+                    product.stock -= qty / Decimal("1000.0")
+                else:
+                    product.stock -= qty
+                product.save()
 
         # বেনিফিট ডিস্ট্রিবিউশন (Completed হলে)
         if self.status == "Completed" and not self.points_awarded:
