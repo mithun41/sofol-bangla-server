@@ -1,9 +1,19 @@
 from django.urls import path
-from .views import AdminDashboardReportView, AdminOrderAnalyticsView, AdminOrderDelete, OrderCreateView, AdminOrderListView, AdminOrderUpdateView, OrderSalesAnalyticsView, UserDashboardReportView, UserOrderListView
+from .views import (
+    AdminDashboardReportView,
+    AdminOrderAnalyticsView,
+    AdminOrderDelete,
+    OrderCreateView,
+    AdminOrderListView,
+    AdminOrderUpdateView,
+    OrderSalesAnalyticsView,
+    UserDashboardReportView,
+    UserOrderListView,
+)
+from .SalesReportView import SalesReportView  # আলাদা file থেকে
 
 urlpatterns = [
     path("place-order/", OrderCreateView.as_view(), name="place_order"),
-    # অ্যাডমিন রুটস
     path("admin-list/", AdminOrderListView.as_view(), name="admin_order_list"),
     path(
         "admin-update/<int:pk>/",
@@ -24,6 +34,11 @@ urlpatterns = [
         "admin/sales-report/",
         OrderSalesAnalyticsView.as_view(),
         name="admin-sales-report",
+    ),
+    path(
+        "admin/full-sales-report/",
+        SalesReportView.as_view(),
+        name="admin-full-sales-report",
     ),
     path("admin-delete/<int:pk>/", AdminOrderDelete.as_view()),
 ]
