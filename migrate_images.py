@@ -10,15 +10,22 @@ django.setup()
 from products.models import Product
 
 
-def start_migration():
-    all_products = Product.objects.all()
-    total = all_products.count()
-    print(f"--- Migration Started on PythonAnywhere: {total} products found ---")
+def start_migration(offset=0, limit=100):
+    # offset মানে শুরু (যেমন ০ থেকে), limit মানে কয়টা (যেমন ১০০ টা)
+    all_products = Product.objects.all()[offset : offset + limit]
+    total_in_batch = all_products.count()
 
-    # PythonAnywhere এর সরাসরি পাথ (যদি সেটিংস থেকে না পায়)
+    if total_in_batch == 0:
+        print("--- No more products to migrate in this batch! ---")
+        return
+
+    print(
+        f"--- Batch Started: {offset} to {offset+limit} (Total: {total_in_batch}) ---"
+    )
+
     PA_MEDIA_PATH = "/home/mithun41/sofol-bangla-server/media"
 
-    for i, p in enumerate(all_products, 1):
+    for i, p in enumerate(all_products, offset + 1):
         image_fields = ["image", "barcode_image"]
         updated = False
 
@@ -27,12 +34,9 @@ def start_migration():
 
             if image_field and not str(image_field).startswith("http"):
                 try:
-                    # প্রথমে সেটিংস এর MEDIA_ROOT দিয়ে চেক করবে
                     local_file_path = os.path.join(
                         settings.MEDIA_ROOT, str(image_field.name)
                     )
-
-                    # যদি না পায় তবে সরাসরি PythonAnywhere পাথ দিয়ে চেক করবে
                     if not os.path.exists(local_file_path):
                         local_file_path = os.path.join(
                             PA_MEDIA_PATH, str(image_field.name)
@@ -42,26 +46,25 @@ def start_migration():
                         with open(local_file_path, "rb") as f:
                             file_content = f.read()
                             file_name = os.path.basename(local_file_path)
-
                             new_file = ContentFile(file_content, name=file_name)
                             image_field.save(file_name, new_file, save=False)
-
                         updated = True
-                        print(
-                            f"[{i}/{total}] Success: {field_name} uploaded for '{p.name}'"
-                        )
+                        print(f"[{i}] Success: {field_name} for '{p.name}'")
                     else:
-                        print(
-                            f"[{i}/{total}] Skip: File not found at {local_file_path}"
-                        )
+                        print(f"[{i}] Skip: File not found at {local_file_path}")
                 except Exception as e:
-                    print(f"[{i}/{total}] Error on {p.name} ({field_name}): {e}")
+                    print(f"[{i}] Error on {p.name} ({field_name}): {e}")
 
         if updated:
             p.save()
 
-    print("--- Migration Completed on PythonAnywhere! ---")
+    print(f"--- Batch {offset} to {offset+limit} Completed! ---")
 
 
 if __name__ == "__main__":
-    start_migration()
+    # মামা, এখানে তুই কন্ট্রোল করবি:
+    # প্রথমবার রান করতে: offset=0, limit=100
+    # পরেরবার রান করতে: offset=100, limit=100
+    # তার পরেরবার: offset=200, limit=100 ... এভাবে।
+
+    start_migration(offset=0, limit=100)
