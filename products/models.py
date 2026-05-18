@@ -30,12 +30,14 @@ class Category(models.Model):
 
 
 import random
-import barcode
-from barcode.writer import ImageWriter
 from io import BytesIO
-from django.core.files import File
 from django.db import models
 from django.utils.text import slugify
+from django.core.files.base import ContentFile  # এটি যোগ করা হয়েছে
+
+# বারকোড লাইব্রেরি ইম্পোর্ট (নিশ্চিত করিস এগুলো ইন্সটল আছে)
+import barcode
+from barcode.writer import ImageWriter
 
 
 class Product(models.Model):
@@ -67,7 +69,6 @@ class Product(models.Model):
     stock = models.DecimalField(max_digits=12, decimal_places=3, default=0.000)
 
     image = models.ImageField(upload_to="products/", null=True, blank=True)
-    # এখানে unique=True এবং blank=True রাখা হয়েছে
     barcode_number = models.CharField(max_length=255, unique=True, blank=True)
     barcode_image = models.ImageField(upload_to="barcodes/", blank=True, null=True)
 
@@ -88,28 +89,38 @@ class Product(models.Model):
                 number = "".join([str(random.randint(0, 9)) for _ in range(13)])
             self.barcode_number = number
 
-        # ৩. বারকোড ইমেজ জেনারেট লজিক (আপডেটের জন্য উপযোগী)
-        # ডাটাবেজে আগে থেকে কি নাম্বার আছে তা চেক করার জন্য
+        # ৩. বারকোড ইমেজ জেনারেট লজিক
         if self.pk:
-            old_product = Product.objects.get(pk=self.pk)
-            # যদি বারকোড নাম্বার পরিবর্তন করা হয়, তবে আগের ইমেজ ডিলিট করে নতুনটা বানাতে হবে
-            if old_product.barcode_number != self.barcode_number:
-                self.generate_barcode_image()
+            try:
+                old_product = Product.objects.get(pk=self.pk)
+                if old_product.barcode_number != self.barcode_number:
+                    self.generate_barcode_image()
+            except Product.DoesNotExist:
+                pass
         else:
-            # নতুন প্রোডাক্ট তৈরির সময় ইমেজ না থাকলে বানাবে
             if not self.barcode_image:
                 self.generate_barcode_image()
 
         super().save(*args, **kwargs)
 
     def generate_barcode_image(self):
-        """বারকোড ইমেজ তৈরির আলাদা ফাংশন"""
+        """বারকোড ইমেজ তৈরির ফিক্সড ফাংশন (Cloudinary Compatible)"""
         CODE128 = barcode.get_barcode_class("code128")
         code_img = CODE128(self.barcode_number, writer=ImageWriter())
+
+        # বাফারে ইমেজ রাইট করা
         buffer = BytesIO()
         code_img.write(buffer)
+
+        # ফাইল নাম তৈরি
         filename = f"barcode-{self.barcode_number}.png"
-        self.barcode_image.save(filename, File(buffer), save=False)
+
+        # --- ফিক্স: বাফারের পজিশন শুরুতে নিয়ে আসা এবং ContentFile ব্যবহার করা ---
+        buffer.seek(0)
+        file_content = buffer.getvalue()  # বাফার থেকে ডাটা নেওয়া
+
+        # ক্লাউডিনারিতে সরাসরি বাইনারি কন্টেন্ট পাঠানো
+        self.barcode_image.save(filename, ContentFile(file_content), save=False)
 
     def __str__(self):
         return self.name
