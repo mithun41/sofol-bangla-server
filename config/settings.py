@@ -33,13 +33,11 @@ ALLOWED_HOSTS = ["mithun41.pythonanywhere.com", "localhost", "127.0.0.1"]
 # Application definition
 
 INSTALLED_APPS = [
-    "cloudinary_storage",
     "django.contrib.admin",
     "django.contrib.auth",
     "django.contrib.contenttypes",
     "django.contrib.sessions",
     "django.contrib.messages",
-    "cloudinary",
     "django.contrib.staticfiles",
     # Third party apps
     "rest_framework",
@@ -130,12 +128,6 @@ DATABASES = {
 #     }
 # }
 
-CLOUDINARY_STORAGE = {
-    "CLOUD_NAME": "dolauolo2",
-    "API_KEY": "366553971367551",
-    "API_SECRET": "mze_qTBeLEByT_Yoa1fmwmOWdHc",  
-}
-
 
 # Password validation
 # https://docs.djangoproject.com/en/6.0/ref/settings/#auth-password-validators
@@ -180,14 +172,3 @@ CSRF_TRUSTED_ORIGINS = ["https://sofol-bangla-frontend.vercel.app"]
 # প্রোডাকশনে এটাকে False করে দিবি যখন কাজ শেষ হবে
 DEBUG = True
 APPEND_SLASH = True
-# ডিফল্ট স্টোরেজ হিসেবে ক্লাউডিনারি সেট করা
-# DEFAULT_FILE_STORAGE = "cloudinary_storage.storage.MediaCloudinaryStorage"
-# ড্যাঙ্গো ৪.২+ এবং ৬.০ এর জন্য লেটেস্ট নিয়ম
-STORAGES = {
-    "default": {
-        "BACKEND": "cloudinary_storage.storage.MediaCloudinaryStorage",
-    },
-    "staticfiles": {
-        "BACKEND": "django.contrib.staticfiles.storage.StaticFilesStorage",
-    },
-}
