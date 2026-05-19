@@ -3,29 +3,45 @@ import django
 from django.core.files.base import ContentFile
 from django.conf import settings
 
-# ১. ড্যাঙ্গো সেটআপ
+# =====================================================================
+# 🚨 PYTHONANYWHERE PROXY MONKEY-PATCH (সবচেয়ে শক্তিশালী নেটওয়ার্ক হ্যাক)
+# =====================================================================
+# ক্লাউডিনারি বা উরলিব ব্যাকগ্রাউন্ডে যাই ব্যবহার করুক, এই প্যাচটি পাইথনের গ্লোবাল
+# HTTPSConnectionPool-কে বাধ্য করবে পাইথনঅ্যানিহোয়্যারের প্রক্সি দিয়ে ডেটা পাঠাতে।
+
+import urllib3
+
+proxy_url = "http://proxy.server:3128"
+urllib3.util.PROXY_SCHEME_TO_POOL_MANAGER["https"] = urllib3.ProxyManager(proxy_url)
+urllib3.util.PROXY_SCHEME_TO_POOL_MANAGER["http"] = urllib3.ProxyManager(proxy_url)
+
+# গ্লোবাল এনভায়রনমেন্টও কঠোরভাবে লক করা হলো
+os.environ["http_proxy"] = proxy_url
+os.environ["https_proxy"] = proxy_url
+os.environ["HTTP_PROXY"] = proxy_url
+os.environ["HTTPS_PROXY"] = proxy_url
+
+# ২. ড্যাঙ্গো সেটআপ
 os.environ.setdefault("DJANGO_SETTINGS_MODULE", "config.settings")
 django.setup()
 
 from products.models import Product, Category
 from accounts.models import User
-
-# সরাসরি ক্লাউডিনারির অফিশিয়াল আপলোডার ইমপোর্ট করা
 import cloudinary
 import cloudinary.uploader
 
-# ক্লাউডিনারি কনফিগারেশন এবং কড়াভাবে প্রক্সি সেট করা
+# ক্লাউডিনারি কনফিগ
 cloudinary.config(
     cloud_name="dolauolo2",
     api_key="366553971367551",
     api_secret="mze_qTBeLEByT_Yoa1fmwmOWdHc",
-    api_proxy="http://proxy.server:3128",  # পাইথনঅ্যানিহোয়্যারের ফ্রি প্রক্সি গেটওয়ে
+    api_proxy=proxy_url,
 )
 
 
 def start_migration(model_class, image_fields, label):
     print(f"\n=======================================================")
-    print(f"🚀 Starting {label} Migration via Direct Cloudinary Uploader...")
+    print(f"🚀 Starting {label} Migration via Global Proxy Tunnel...")
     print(f"=======================================================")
 
     queryset = model_class.objects.all()
@@ -40,17 +56,14 @@ def start_migration(model_class, image_fields, label):
         for field_name in image_fields:
             image_field = getattr(instance, field_name)
 
-            # যদি ইমেজ থাকে এবং ক্লাউডিনারি লিংক না হয়
             if image_field and not str(image_field).startswith("http"):
                 try:
                     local_file_path = os.path.join(MEDIA_PATH, str(image_field.name))
 
                     if os.path.exists(local_file_path):
-                        # ফোল্ডারের নাম ডাইনামিকালি বের করা (যেমন: categories, products)
                         folder_name = os.path.dirname(str(image_field.name))
 
-                        # ড্যাঙ্গো স্টোরেজ বাইপাস করে সরাসরি ক্লাউডিনারি এপিআই-তে হিট করা
-                        # এখানে প্রক্সি গ্যারান্টিসহ কাজ করবে
+                        # সরাসরি আপলোড মেথড
                         upload_result = cloudinary.uploader.upload(
                             local_file_path,
                             folder=folder_name,
@@ -58,7 +71,6 @@ def start_migration(model_class, image_fields, label):
                             unique_filename=False,
                         )
 
-                        # ক্লাউডিনারি থেকে পাওয়া সিকিউর ইউআরএল ডাটাবেজে অ্যাসাইন করা
                         secure_url = upload_result.get("secure_url")
                         setattr(instance, field_name, secure_url)
 
@@ -70,7 +82,6 @@ def start_migration(model_class, image_fields, label):
                     print(f"[{i}] Error on {instance_name} ({field_name}): {e}")
 
         if updated:
-            # শুধুমাত্র ইমেজ ফিল্ডটাই সেভ হবে যাতে অন্য লজিকে ইমপ্যাক্ট না পড়ে
             instance.save(update_fields=image_fields)
 
     print(f"✅ {label} Migration Completed!")
@@ -80,10 +91,8 @@ if __name__ == "__main__":
     # ১. শুধু ক্যাটাগরি আপলোড:
     start_migration(Category, ["image"], "Category")
 
-    # ২. প্রোডাক্ট এবং বারকোড আপলোড (প্রয়োজন হলে আনকমেন্ট করিস মামা):
+    # দরকার হলে নিচেরগুলো আনকমেন্ট করিস মামা:
     # start_migration(Product, ["image", "barcode_image"], "Product/Barcode")
-
-    # ৩. ইউজার প্রোফাইল পিকচার আপলোড:
     # start_migration(User, ["profile_picture"], "User Profile Picture")
 
     print("\n🎉 All migrations finished successfully!")
