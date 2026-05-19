@@ -186,13 +186,12 @@ class CartSerializer(serializers.ModelSerializer):
     # ✅ স্টক ভ্যালিডেশন লজিক
     def validate(self, data):
         """
-        মডেল চেঞ্জ না করে সিরিয়ালাইজার থেকে স্টক চেক করা
+        মডেল চেンジ না করে সিরিয়ালাইজার থেকে স্টক চেক করা
         """
-        # ডাটা থেকে প্রোডাক্ট এবং কোয়ান্টিটি বের করা
         product = data.get("product")
         quantity = data.get("quantity")
 
-        # যদি এডিট (update) করা হয়, তবে ডাটাবেজে থাকা কার্ট অবজেক্ট থেকে প্রোডাক্ট নিতে হবে
+        # যদি এডিট (update) করা হয়, তবে ডাটাবেজে থাকা কার্ট অবজেক্ট থেকে প্রোডাক্ট নিতে হবে
         if not product and self.instance:
             product = self.instance.product
 
@@ -201,11 +200,11 @@ class CartSerializer(serializers.ModelSerializer):
             if quantity > product.stock:
                 raise serializers.ValidationError(
                     {
-                        "quantity": f"মামা, স্টকের বেশি অর্ডার দেওয়া সম্ভব না! বর্তমানে স্টক আছে {product.stock} {product.get_unit_type_display()}."
+                        "quantity": f"মামা, স্টকের বেশি অর্ডার দেওয়া সম্ভব না! বর্তমানে স্টক আছে {product.stock} {product.get_unit_type_display()}."
                     }
                 )
 
-        # কোয়ান্টিটি ০ বা তার কম কি না চেক করা
+        # কোয়ান্টিটি ০ বা তার কম কি না চেক করা
         if quantity is not None and quantity <= 0:
             raise serializers.ValidationError(
                 {"quantity": "মামা, অন্তত কিছু তো কিনতে হবে! পরিমাণ ০ হতে পারে না।"}
@@ -243,13 +242,10 @@ class CartSerializer(serializers.ModelSerializer):
         return float(product.point_value or 0)
 
     def get_item_subtotal(self, obj):
-        # আপনার বিদ্যমান লজিক
         try:
             if isinstance(obj, dict):
-                product_data = obj.get("product")
                 quantity = float(obj.get("quantity", 0))
             else:
-                product_data = getattr(obj, "product", None)
                 quantity = float(getattr(obj, "quantity", 0))
 
             price = self.get_product_price(obj)  # সরাসরি এই মেথড ব্যবহার করা নিরাপদ
@@ -257,15 +253,24 @@ class CartSerializer(serializers.ModelSerializer):
         except:
             return 0.0
 
+    # 🔥 [FIXED] কার্টের প্রোডাক্ট ইমেজ ডাবল ইউআরএল ও লোকাল ডোমেইন জট ক্লিনআপ মেথড
     def get_product_image(self, obj):
-        request = self.context.get("request")
         product = obj.product if hasattr(obj, "product") else obj.get("product")
+
         if product and product.image:
-            return (
-                request.build_absolute_uri(product.image.url)
-                if request
-                else product.image.url
-            )
+            url_str = str(product.image)
+
+            # যদি ইমেজের ভেতরে ক্লাউডিনারির নাম গন্ধ থাকে
+            if "res.cloudinary.com" in url_str:
+                raw_cloudinary_part = url_str.split("res.cloudinary.com")[-1]
+                # নিখুঁত ডাবল স্লাশসহ লিংক জেনারেট করে রিটার্ন করা
+                return "https://res.cloudinary.com" + raw_cloudinary_part.replace(
+                    "%3A", ":"
+                )
+
+            # যদি কোনো কারণে একদম র পাথ থাকে (যেমন মিগ্রেশনের আগের ফাইল)
+            return url_str
+
         return None
 
 
