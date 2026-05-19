@@ -5,18 +5,17 @@ from .models import Banner, Category, Product, Cart
 
 
 class CategorySerializer(serializers.ModelSerializer):
-    # 👇 ইমেজ ফিল্ডটিকে মেথড ফিল্ড করা হলো যাতে ডাবল লিংক ট্রিম করা যায়
-    image = serializers.SerializerMethodField()
+    # 👇 [FIX] SerializerMethodField সরিয়ে নরমাল ইমেজ ফিল্ড করা হলো যাতে POST/PUT-এ ডাটা নেয়
+    image = serializers.ImageField(required=False, allow_null=True)
 
     # সাব-ক্যাটাগরির লিস্ট দেখানোর জন্য (Read Only)
     subcategories = serializers.SerializerMethodField()
 
-    # প্যারেন্ট ক্যাটাগরির নাম দেখানোর জন্য (ঐচ্ছিক, ফ্রন্টএন্ডে সুবিধা হবে)
+    # প্যারেন্ট ক্যাটাগরির নাম দেখানোর জন্য
     parent_name = serializers.ReadOnlyField(source="parent.name")
 
     class Meta:
         model = Category
-        # 'parent' ফিল্ডটি এখানে যোগ করা হয়েছে যাতে সাব-ক্যাটাগরি সেভ করা যায়
         fields = [
             "id",
             "name",
@@ -27,24 +26,30 @@ class CategorySerializer(serializers.ModelSerializer):
             "subcategories",
         ]
 
-    # 🔥 ক্যাটাগরি ইমেজ থেকে প্রিলিংক বা ডাবল লিংক বাদ দেওয়ার মেথড
-    def get_image(self, obj):
-        if obj.image:
-            url_str = str(obj.image)
-            # যদি লিংকে দুইবার https:// থাকে, তবে শেষের আসল অংশটুকু কেটে নেবে
-            if url_str.count("https://") > 1:
-                return "https://" + url_str.split("https://")[-1]
-            return url_str
-        return ""
-
     def get_subcategories(self, obj):
-        # যদি এই ক্যাটাগরির আন্ডারে কোনো সাব-ক্যাটাগরি থাকে তবে সেগুলো দেখাবে
+        # সাব-ক্যাটাগরির রিকোর্সিভ কলিং
         serializer = CategorySerializer(
             obj.subcategories.all(),
             many=True,
             context={"request": self.context.get("request")},
         )
         return serializer.data
+
+    # 🔥 [MAGIC METHOD] ক্যাটাগরি রেসপন্সের ডাবল ইউআরএল এবং ডাবল স্লাশ ফিক্স
+    def to_representation(self, instance):
+        representation = super().to_representation(instance)
+
+        if representation.get("image"):
+            url_str = str(representation["image"])
+            if "https" in url_str:
+                # মেইন ক্লাউডিনারি পার্টটুকু আলাদা করে নিখুঁত ডাবল স্লাশ লিংক তৈরি করা
+                raw_cloudinary_part = url_str.split("res.cloudinary.com")[-1]
+                representation["image"] = (
+                    "https://res.cloudinary.com"
+                    + raw_cloudinary_part.replace("%3A", ":")
+                )
+
+        return representation
 
 
 class ProductSerializer(serializers.ModelSerializer):
@@ -265,8 +270,25 @@ class CartSerializer(serializers.ModelSerializer):
 
 
 class BannerSerializer(serializers.ModelSerializer):
-    # ইমেজ ফিল্ডকে সাধারণভাবেই রাখ যেন রিড/রাইট দুইটাই হয়
-    # জ্যাঙ্গো নিজেই ফুল ইউআরএল হ্যান্ডেল করবে
+    # ইমেজ ফিল্ড নরমাল থাকল যাতে আপলোড (Write) করা যায়
+    image = serializers.ImageField(required=True)
+
     class Meta:
         model = Banner
-        fields = ['id', 'title', 'image', 'link', 'is_active', 'created_at']
+        fields = ["id", "title", "image", "link", "is_active", "created_at"]
+
+    # 🔥 [MAGIC METHOD] ব্যানার রেসপন্সের ডাবল ইউআরএল এবং ডাবল স্লাশ ফিক্স
+    def to_representation(self, instance):
+        representation = super().to_representation(instance)
+
+        if representation.get("image"):
+            url_str = str(representation["image"])
+            if "https" in url_str:
+                # মেইন ক্লাউডিনারি পার্টটুকু আলাদা করে নিখুঁত ডাবল স্লাশ লিংক তৈরি করা
+                raw_cloudinary_part = url_str.split("res.cloudinary.com")[-1]
+                representation["image"] = (
+                    "https://res.cloudinary.com"
+                    + raw_cloudinary_part.replace("%3A", ":")
+                )
+
+        return representation
