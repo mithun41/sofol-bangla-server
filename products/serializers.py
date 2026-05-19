@@ -95,19 +95,22 @@ class ProductSerializer(serializers.ModelSerializer):
     def to_representation(self, instance):
         representation = super().to_representation(instance)
 
-        # ১. মেইন ইমেজ ডাবল ইউআরএল ক্লিনআপ
+        # ১. মেইন ইমেজ থেকে লোকাল ডোমেইন এবং ডাবল লিংক ক্লিনআপ
         if representation.get("image"):
             url_str = str(representation["image"])
-            if url_str.count("https://") > 1:
-                representation["image"] = "https://" + url_str.split("https://")[-1]
+            if "https" in url_str:
+                # যদি লোকাল ডোমেইনের ভেতরে https লুকিয়ে থাকে, তবে শেষের আসল https থেকে কেটে নেবে
+                # url_str.split("https")[-1] করলে পাবো: ://res.cloudinary.com/...
+                # আমরা জাস্ট শুরুতে একটা ফ্রেশ https জুড়ে দেব এবং এনকোড হওয়া %3A বা কোলনের জটটা ক্লিন করব
+                actual_url = "https" + url_str.split("https")[-1]
+                representation["image"] = actual_url.replace("%3A", ":")
 
-        # ২. বারকোড ইমেজ ডাবল ইউআরএল ক্লিনআপ
+        # ২. বারকোড ইমেজ থেকে লোকাল ডোমেইন এবং ডাবল লিংক ক্লিনআপ
         if representation.get("barcode_image"):
             url_str = str(representation["barcode_image"])
-            if url_str.count("https://") > 1:
-                representation["barcode_image"] = (
-                    "https://" + url_str.split("https://")[-1]
-                )
+            if "https" in url_str:
+                actual_url = "https" + url_str.split("https")[-1]
+                representation["barcode_image"] = actual_url.replace("%3A", ":")
 
         return representation
 
