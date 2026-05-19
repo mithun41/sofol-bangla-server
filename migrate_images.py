@@ -131,7 +131,9 @@ def start_migration(model_class, image_fields, label):
 
 if __name__ == "__main__":
     # ১. শুধু ক্যাটাগরি আপলোড:
-    start_migration(Category, ["image"], "Category")
+    # start_migration(Category, ["image"], "Category")
+    start_migration(Product, ["image", "barcode_image"], "Product/Barcode")
+    start_migration(User, ["profile_picture"], "User Profile Picture")
 
     # প্রয়োজন হলে নিচের মডিউলগুলো আনকমেন্ট করে নিতে পারিস মামা:
     # start_migration(Product, ["image", "barcode_image"], "Product/Barcode")
