@@ -78,7 +78,7 @@ MIDDLEWARE = [
 ]
 
 ROOT_URLCONF = "config.urls"
-CORS_ALLOW_ALL_ORIGINS = True  # টেস্টিং এর জন্য এটা সাময়িকভাবে True করে দেখতে পারিস
+CORS_ALLOW_ALL_ORIGINS = True  # টেস্টিং এর জন্য এটা সাময়িকভাবে True করে দেখতে পারিস
 CORS_ALLOW_CREDENTIALS = True
 # CORS_ALLOWED_ORIGINS = [
 #     "https://sofol-bangla-frontend.vercel.app",
@@ -181,17 +181,22 @@ CSRF_TRUSTED_ORIGINS = ["https://sofol-bangla-frontend.vercel.app"]
 # প্রোডাকশনে এটাকে False করে দিবি যখন কাজ শেষ হবে
 DEBUG = True
 APPEND_SLASH = True
-# ডিফল্ট স্টোরেজ হিসেবে ক্লাউডিনারি সেট করা
+
+# ডিফল্ট স্টোরেজ হিসেবে ক্লাউডিনারি সেট করা (পুরাতন নিয়ম কমেন্ট আউট করা হলো)
 # DEFAULT_FILE_STORAGE = "cloudinary_storage.storage.MediaCloudinaryStorage"
-# ড্যাঙ্গো ৪.২+ এবং ৬.০ এর জন্য লেটেস্ট নিয়ম
+
+# 👇 [FIXED] ড্যাঙ্গো ৬.০ এর জন্য ডিফল্ট ফাইল ব্যাকএন্ড লোকাল সিস্টেমে রিসেট করা হলো
+# এর ফলে থার্ড-পার্টি প্যাকেজটি নিজে থেকে কানেকশন তৈরি করে ক্র্যাশ করতে পারবে না
 STORAGES = {
     "default": {
-        "BACKEND": "cloudinary_storage.storage.MediaCloudinaryStorage",
+        "BACKEND": "django.core.files.storage.FileSystemStorage",
     },
     "staticfiles": {
         "BACKEND": "django.contrib.staticfiles.storage.StaticFilesStorage",
     },
 }
+
+# 🛠️ গ্লোবাল এনভায়রনমেন্ট প্রক্সি সেটিংস (সুরক্ষার জন্য রাখা হলো)
 import os
 
 os.environ["http_proxy"] = "http://proxy.server:3128"
