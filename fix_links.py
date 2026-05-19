@@ -7,30 +7,47 @@ django.setup()
 from products.models import Product
 
 
-def clean_double_urls():
+def clean_database_links():
+    print("🔄 Scanning database for broken Cloudinary links...")
     products = Product.objects.all()
     count = 0
 
     for p in products:
         updated = False
-        # image এবং barcode_image দুটি ফিল্ডই চেক করা হচ্ছে
-        for field_name in ["image", "barcode_image"]:
-            current_value = str(getattr(p, field_name))
 
-            # যদি লিংকের ভেতর দুইবার http থাকে (ডাবল ইউআরএল)
-            if current_value.count("http") > 1:
-                # একদম শেষের 'https' থেকে শুরু করে বাকি আসল লিংকটুকু কেটে নেওয়া হচ্ছে
-                actual_url = "https" + current_value.split("https")[-1]
-                setattr(p, field_name, actual_url)
-                updated = True
+        for field_name in ["image", "barcode_image"]:
+            # ড্যাঙ্গোর প্রসেসিং এড়াতে সরাসরি ডাটাবেজের র ভ্যালু চেক করা
+            raw_value = getattr(p, field_name).name if getattr(p, field_name) else ""
+
+            if raw_value:
+                # সিনারিও ১: যদি পাথের ভেতর 'https://res.cloudinary.com' টেক্সটটা লুকিয়ে থাকে
+                if "https:/" in raw_value or "https://" in raw_value:
+                    # আসল লিংকটুকু খুঁজে বের করা
+                    if "https:/" in raw_value and "https://" not in raw_value:
+                        actual_url = "https://" + raw_value.split("https:/")[-1].lstrip(
+                            "/"
+                        )
+                    else:
+                        actual_url = "https://" + raw_value.split("https://")[-1]
+
+                    # ড্যাঙ্গোর স্টোরেজকে বাইপাস করে সরাসরি র স্ট্রিং সেট করা
+                    setattr(p, field_name, actual_url)
+                    updated = True
+
+                # সিনারিо ২: যদি ডাবল মিডিয়া বা রিলেটিভ পাথ জট লেগে থাকে
+                elif raw_value.startswith("media/http"):
+                    actual_url = raw_value.replace("media/", "")
+                    setattr(p, field_name, actual_url)
+                    updated = True
 
         if updated:
+            # শুধুমাত্র নির্দিষ্ট ফিল্ডগুলো সেভ করা হচ্ছে যাতে সেটিংসের স্টোরেজ মডিউল ডিস্টার্ব না করে
             p.save(update_fields=["image", "barcode_image"])
             count += 1
-            print(f"✅ Fixed links for product: {p.name}")
+            print(f"✅ Successfully Fixed: {p.name}")
 
-    print(f"🎉 Total {count} products fixed!")
+    print(f"\n🎉 Total {count} products fixed and cleaned in database!")
 
 
 if __name__ == "__main__":
-    clean_double_urls()
+    clean_database_links()
