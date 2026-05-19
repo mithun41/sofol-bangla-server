@@ -51,14 +51,14 @@ class ProductSerializer(serializers.ModelSerializer):
     category_name = serializers.ReadOnlyField(source="category.name")
     unit_display = serializers.CharField(source="get_unit_type_display", read_only=True)
 
-    # আগের ফরম্যাটের ক্যালকুলেটেড ফিল্ডস
+    # ক্যালকুলেটেড ফিল্ডস
     original_price = serializers.ReadOnlyField(source="price")
     discount_price = serializers.SerializerMethodField()
     display_price = serializers.SerializerMethodField()
 
-    # 👇 ডাবল ক্লাউডিনারি লিংক ফিক্স করার জন্য ফিল্ড দুটিকে মেথড ফিল্ড করা হলো
-    image = serializers.SerializerMethodField()
-    barcode_image = serializers.SerializerMethodField()
+    # 👇 [FIX] SerializerMethodField সরিয়ে নরমাল ইমেজ ফিল্ড রাখা হলো যাতে POST/PUT-এ ইমেজ ইনপুট নেয়
+    image = serializers.ImageField(required=False, allow_null=True)
+    barcode_image = serializers.ImageField(read_only=True)
 
     class Meta:
         model = Product
@@ -69,7 +69,7 @@ class ProductSerializer(serializers.ModelSerializer):
             "name",
             "slug",
             "description",
-            "purchase_price",  # আগের ফিল্ড ফিরিয়ে আনা হলো
+            "purchase_price",
             "price",
             "unit_type",
             "unit_display",
@@ -79,7 +79,7 @@ class ProductSerializer(serializers.ModelSerializer):
             "barcode_number",
             "barcode_image",
             "is_active",
-            "is_featured",  # আগের ফিল্ড ফিরিয়ে আনা হলো
+            "is_featured",
             "original_price",
             "discount_price",
             "display_price",
@@ -87,40 +87,37 @@ class ProductSerializer(serializers.ModelSerializer):
         ]
         extra_kwargs = {
             "is_active": {"read_only": True},
-            # "barcode_number": {"read_only": True},
             "barcode_image": {"read_only": True},
         }
 
-    # 🔥 ১. ইমেজ থেকে প্রিলিংক বা ডাবল লিংক বাদ দেওয়ার মেথড
-    def get_image(self, obj):
-        if obj.image:
-            url_str = str(obj.image)
-            # যদি ডাবল লিংক জেনারেট হয়ে থাকে, তবে শেষের ফ্রেশ অংশটা কেটে নেবে
-            if url_str.count("https://") > 1:
-                return "https://" + url_str.split("https://")[-1]
-            return url_str
-        return ""
+    # 🔥 [MAGIC METHOD] এপিআই যখন ফ্রন্টএন্ডে রেসপন্স (GET/POST Response) পাঠাবে,
+    # তখন সে নিজে থেকেই ডাবল ক্লাউডিনারি লিংকের প্রথম অংশটুকু কেটে ফ্রেশ করে দেবে।
+    def to_representation(self, instance):
+        representation = super().to_representation(instance)
 
-    # 🔥 ২. বারকোড ইমেজ থেকে ডাবল লিংক বাদ দেওয়ার মেথড
-    def get_barcode_image(self, obj):
-        if obj.barcode_image:
-            url_str = str(obj.barcode_image)
+        # ১. মেইন ইমেজ ডাবল ইউআরএল ক্লিনআপ
+        if representation.get("image"):
+            url_str = str(representation["image"])
             if url_str.count("https://") > 1:
-                return "https://" + url_str.split("https://")[-1]
-            return url_str
-        return ""
+                representation["image"] = "https://" + url_str.split("https://")[-1]
+
+        # ২. বারকোড ইমেজ ডাবল ইউআরএল ক্লিনআপ
+        if representation.get("barcode_image"):
+            url_str = str(representation["barcode_image"])
+            if url_str.count("https://") > 1:
+                representation["barcode_image"] = (
+                    "https://" + url_str.split("https://")[-1]
+                )
+
+        return representation
 
     def get_discount_price(self, obj):
-        """ইউজার একটিভ থাকলে ডিসকাউন্ট ক্যালকুলেট করা (Price - PV*2)"""
         request = self.context.get("request")
         try:
             base_price = Decimal(str(obj.price))
             pv = Decimal(str(obj.point_value or 0))
-
             if request and request.user.is_authenticated:
                 u_status = getattr(request.user, "status", "").lower().strip()
-
-                # একটিভ ইউজার হলে (কিন্তু অ্যাডমিন না হলে) ডিসকাউন্ট পাবে
                 if u_status == "active" and not request.user.is_staff:
                     discounted = base_price - (pv * Decimal("2.0"))
                     return float(round(discounted, 2))
@@ -129,15 +126,10 @@ class ProductSerializer(serializers.ModelSerializer):
         return None
 
     def get_display_price(self, obj):
-        """ফ্রন্টএন্ডে যেটা মেইন প্রাইস হিসেবে দেখাবে"""
         discount = self.get_discount_price(obj)
         return discount if discount is not None else float(obj.price)
 
     def validate(self, data):
-        """
-        স্টক যেন পজিটিভ থাকে তা নিশ্চিত করা এবং ইনপুট ভ্যালিডেশন।
-        """
-        # আপডেট বা ক্রিয়েট করার সময় স্টক চেক
         stock_val = data.get("stock", 0)
         try:
             if float(stock_val) < 0:
@@ -146,7 +138,6 @@ class ProductSerializer(serializers.ModelSerializer):
                 )
         except (ValueError, TypeError):
             pass
-
         return data
 
 
