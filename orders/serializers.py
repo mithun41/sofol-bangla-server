@@ -4,6 +4,9 @@ from products.models import Product
 from django.db import transaction
 
 
+# =====================================================================
+# 🛒 1. ORDER ITEM SERIALIZER (FIXED)
+# =====================================================================
 class OrderItemSerializer(serializers.ModelSerializer):
     product_image = serializers.SerializerMethodField()
 
@@ -22,22 +25,30 @@ class OrderItemSerializer(serializers.ModelSerializer):
         # এই ফিল্ডগুলো শুধু দেখাবে, ইনপুট হিসেবে নিবে না
         read_only_fields = ["purchase_price", "profit"]
 
+    # 🔥 [FIXED] অর্ডারের ভেতরের প্রোডাক্ট ইমেজ ডাবল ইউআরএল ও লোকাল ডোমেইন জট ক্লিনআপ মেthod
     def get_product_image(self, obj):
         try:
-            # ইমেজ লজিক ঠিক আছে
-            from products.models import Product
-
+            # ডাটাবেজ থেকে অর্ডার আইটেমের প্রোডাক্টটি খুঁজে বের করা
             product = Product.objects.get(id=obj.product_id)
             if product.image:
-                request = self.context.get("request")
-                if request:
-                    return request.build_absolute_uri(product.image.url)
-                return product.image.url
+                url_str = str(product.image)
+
+                # যদি ইমেজের ভেতরে ক্লাউডিনারির ডোমেইন থাকে, তবে লোকাল পাথ কেটে ফ্রেশ লিংক বানানো
+                if "res.cloudinary.com" in url_str:
+                    raw_cloudinary_part = url_str.split("res.cloudinary.com")[-1]
+                    return "https://res.cloudinary.com" + raw_cloudinary_part.replace(
+                        "%3A", ":"
+                    )
+
+                return url_str
         except Exception:
             return None
         return None
 
 
+# =====================================================================
+# 📄 2. ORDER SERIALIZER (FIXED)
+# =====================================================================
 class OrderSerializer(serializers.ModelSerializer):
     # অর্ডারের সাথে তার আইটেমগুলো দেখানোর জন্য
     items = OrderItemSerializer(many=True, read_only=True)
@@ -65,4 +76,4 @@ class OrderSerializer(serializers.ModelSerializer):
             "items",
         ]
         # এই ফিল্ডগুলো শুধু সার্ভার থেকে আসবে, ফ্রন্টএন্ড থেকে পাঠানোর দরকার নেই
-        read_only_fields = ['id', 'order_number', 'created_at', 'total_pv']
+        read_only_fields = ["id", "order_number", "created_at", "total_pv"]
