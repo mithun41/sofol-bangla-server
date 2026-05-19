@@ -99,18 +99,23 @@ class ProductSerializer(serializers.ModelSerializer):
         if representation.get("image"):
             url_str = str(representation["image"])
             if "https" in url_str:
-                # যদি লোকাল ডোমেইনের ভেতরে https লুকিয়ে থাকে, তবে শেষের আসল https থেকে কেটে নেবে
-                # url_str.split("https")[-1] করলে পাবো: ://res.cloudinary.com/...
-                # আমরা জাস্ট শুরুতে একটা ফ্রেশ https জুড়ে দেব এবং এনকোড হওয়া %3A বা কোলনের জটটা ক্লিন করব
-                actual_url = "https" + url_str.split("https")[-1]
-                representation["image"] = actual_url.replace("%3A", ":")
+                # url_str থেকে ডোমেইনের ভেতরের মেইন ক্লাউডিনারি অংশটা আলাদা করা
+                raw_cloudinary_part = url_str.split("res.cloudinary.com")[-1]
+                # একদম নিখুঁতভাবে ডাবল স্লাশ দিয়ে ফুল লিংক তৈরি করা
+                representation["image"] = (
+                    "https://res.cloudinary.com"
+                    + raw_cloudinary_part.replace("%3A", ":")
+                )
 
         # ২. বারকোড ইমেজ থেকে লোকাল ডোমেইন এবং ডাবল লিংক ক্লিনআপ
         if representation.get("barcode_image"):
             url_str = str(representation["barcode_image"])
             if "https" in url_str:
-                actual_url = "https" + url_str.split("https")[-1]
-                representation["barcode_image"] = actual_url.replace("%3A", ":")
+                raw_cloudinary_part = url_str.split("res.cloudinary.com")[-1]
+                representation["barcode_image"] = (
+                    "https://res.cloudinary.com"
+                    + raw_cloudinary_part.replace("%3A", ":")
+                )
 
         return representation
 
