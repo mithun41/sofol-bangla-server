@@ -7,22 +7,29 @@ from django.conf import settings
 os.environ.setdefault("DJANGO_SETTINGS_MODULE", "config.settings")
 django.setup()
 
-# 👇 ড্যাঙ্গো সেটআপের ঠিক নিচে এই অংশটুকু যোগ কর মামা
-# এটি সরাসরি ক্লাউডিনারি লাইব্রেরির ভেতরে পাইথনঅ্যানিহোয়্যারের প্রক্সি পুশ করে দেবে
-import cloudinary
-
-cloudinary.config(api_proxy="http://proxy.server:3128")
-
 from products.models import Product, Category
 from accounts.models import User
 
+# সরাসরি ক্লাউডিনারির অফিশিয়াল আপলোডার ইমপোর্ট করা
+import cloudinary
+import cloudinary.uploader
+
+# ক্লাউডিনারি কনফিগারেশন এবং কড়াভাবে প্রক্সি সেট করা
+cloudinary.config(
+    cloud_name="dolauolo2",
+    api_key="366553971367551",
+    api_secret="mze_qTBeLEByT_Yoa1fmwmOWdHc",
+    api_proxy="http://proxy.server:3128",  # পাইথনঅ্যানিহোয়্যারের ফ্রি প্রক্সি গেটওয়ে
+)
+
+
 def start_migration(model_class, image_fields, label):
     print(f"\n=======================================================")
-    print(f"🚀 Starting {label} Migration...")
+    print(f"🚀 Starting {label} Migration via Direct Cloudinary Uploader...")
     print(f"=======================================================")
 
     queryset = model_class.objects.all()
-    MEDIA_PATH = settings.MEDIA_ROOT  # পাইথনঅ্যানিহোয়্যারের নিজস্ব মিডিয়া পাথ
+    MEDIA_PATH = settings.MEDIA_ROOT
 
     for i, instance in enumerate(queryset, 1):
         updated = False
@@ -39,37 +46,41 @@ def start_migration(model_class, image_fields, label):
                     local_file_path = os.path.join(MEDIA_PATH, str(image_field.name))
 
                     if os.path.exists(local_file_path):
-                        with open(local_file_path, "rb") as f:
-                            file_content = f.read()
-                            file_name = os.path.basename(local_file_path)
-                            new_file = ContentFile(file_content, name=file_name)
+                        # ফোল্ডারের নাম ডাইনামিকালি বের করা (যেমন: categories, products)
+                        folder_name = os.path.dirname(str(image_field.name))
 
-                            # সরাসরি ক্লাউডিনারিতে আপলোড হবে
-                            image_field.save(file_name, new_file, save=False)
-                        updated = True
-                        print(
-                            f"[{i}] Success: {field_name} uploaded for '{instance_name}'"
+                        # ড্যাঙ্গো স্টোরেজ বাইপাস করে সরাসরি ক্লাউডিনারি এপিআই-তে হিট করা
+                        # এখানে প্রক্সি গ্যারান্টিসহ কাজ করবে
+                        upload_result = cloudinary.uploader.upload(
+                            local_file_path,
+                            folder=folder_name,
+                            use_filename=True,
+                            unique_filename=False,
                         )
+
+                        # ক্লাউডিনারি থেকে পাওয়া সিকিউর ইউআরএল ডাটাবেজে অ্যাসাইন করা
+                        secure_url = upload_result.get("secure_url")
+                        setattr(instance, field_name, secure_url)
+
+                        updated = True
+                        print(f"[{i}] Success: {field_name} uploaded -> {secure_url}")
                     else:
                         print(f"[{i}] Skip: File not found at {local_file_path}")
                 except Exception as e:
                     print(f"[{i}] Error on {instance_name} ({field_name}): {e}")
 
         if updated:
-            # শুধু ইমেজ ফিল্ড সেভ হবে যাতে বোনাস বা বাইনারি কাউন্টে এফেক্ট না পড়ে
+            # শুধুমাত্র ইমেজ ফিল্ডটাই সেভ হবে যাতে অন্য লজিকে ইমপ্যাক্ট না পড়ে
             instance.save(update_fields=image_fields)
 
     print(f"✅ {label} Migration Completed!")
 
 
 if __name__ == "__main__":
-    # মামা, তোর রিকোয়েস্ট অনুযায়ী আপাতত শুধু ক্যাটাগরি অন রাখলাম।
-    # প্রোডাক্ট বা ইউজার আপলোড করতে চাইলে জাস্ট নিচের হ্যাশ (#) কমেন্ট তুলে দিবি।
-
     # ১. শুধু ক্যাটাগরি আপলোড:
     start_migration(Category, ["image"], "Category")
 
-    # ২. প্রোডাক্ট এবং বারকোড আপলোড:
+    # ২. প্রোডাক্ট এবং বারকোড আপলোড (প্রয়োজন হলে আনকমেন্ট করিস মামা):
     # start_migration(Product, ["image", "barcode_image"], "Product/Barcode")
 
     # ৩. ইউজার প্রোফাইল পিকচার আপলোড:
