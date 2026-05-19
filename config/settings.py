@@ -192,3 +192,9 @@ STORAGES = {
         "BACKEND": "django.contrib.staticfiles.storage.StaticFilesStorage",
     },
 }
+import os
+
+os.environ["http_proxy"] = "http://proxy.server:3128"
+os.environ["https_proxy"] = "http://proxy.server:3128"
+os.environ["HTTP_PROXY"] = "http://proxy.server:3128"
+os.environ["HTTPS_PROXY"] = "http://proxy.server:3128"
