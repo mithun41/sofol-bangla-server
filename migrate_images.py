@@ -3,12 +3,18 @@ import django
 from django.core.files.base import ContentFile
 from django.conf import settings
 
-# ১. ড্যাঙ্গো সেটআপ (সার্ভারের ভেতরে রান হওয়ায় কোনো SSH টানেল লাগবে না)
+# 👇 পাইথনঅ্যানিহোয়্যারের ফ্রি অ্যাকাউন্টের প্রক্সি গ্লোবাল এনভায়রনমেন্টে জোরপূর্বক সেট করা
+# এটি স্ক্রিপ্টের সব রিকোয়েস্টকে পাইথনঅ্যানিহোয়্যারের গেটওয়ে দিয়ে পাঠাবে
+os.environ["http_proxy"] = "http://proxy.server:3128"
+os.environ["https_proxy"] = "http://proxy.server:3128"
+
+# ১. ড্যাঙ্গো সেটআপ
 os.environ.setdefault("DJANGO_SETTINGS_MODULE", "config.settings")
 django.setup()
 
 from products.models import Product, Category
 from accounts.models import User
+
 
 
 def start_migration(model_class, image_fields, label):
