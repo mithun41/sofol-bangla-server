@@ -3,27 +3,46 @@ from decimal import Decimal
 from rest_framework import serializers
 from .models import Banner, Category, Product, Cart
 
+
 class CategorySerializer(serializers.ModelSerializer):
-    # ইমেজ ফিল্ডটি আগের মতোই থাকল
-    image = serializers.ImageField(required=False, allow_null=True)
+    # 👇 ইমেজ ফিল্ডটিকে মেথড ফিল্ড করা হলো যাতে ডাবল লিংক ট্রিম করা যায়
+    image = serializers.SerializerMethodField()
 
     # সাব-ক্যাটাগরির লিস্ট দেখানোর জন্য (Read Only)
     subcategories = serializers.SerializerMethodField()
 
     # প্যারেন্ট ক্যাটাগরির নাম দেখানোর জন্য (ঐচ্ছিক, ফ্রন্টএন্ডে সুবিধা হবে)
-    parent_name = serializers.ReadOnlyField(source='parent.name')
+    parent_name = serializers.ReadOnlyField(source="parent.name")
 
     class Meta:
         model = Category
-        # 'parent' ফিল্ডটি এখানে যোগ করা হয়েছে যাতে সাব-ক্যাটাগরি সেভ করা যায়
-        fields = ['id', 'name', 'slug', 'image', 'parent', 'parent_name', 'subcategories']
+        # 'parent' ফিল্ডটি এখানে যোগ করা হয়েছে যাতে সাব-ক্যাটাগরি সেভ করা যায়
+        fields = [
+            "id",
+            "name",
+            "slug",
+            "image",
+            "parent",
+            "parent_name",
+            "subcategories",
+        ]
+
+    # 🔥 ক্যাটাগরি ইমেজ থেকে প্রিলিংক বা ডাবল লিংক বাদ দেওয়ার মেথড
+    def get_image(self, obj):
+        if obj.image:
+            url_str = str(obj.image)
+            # যদি লিংকে দুইবার https:// থাকে, তবে শেষের আসল অংশটুকু কেটে নেবে
+            if url_str.count("https://") > 1:
+                return "https://" + url_str.split("https://")[-1]
+            return url_str
+        return ""
 
     def get_subcategories(self, obj):
         # যদি এই ক্যাটাগরির আন্ডারে কোনো সাব-ক্যাটাগরি থাকে তবে সেগুলো দেখাবে
         serializer = CategorySerializer(
-            obj.subcategories.all(), 
-            many=True, 
-            context={'request': self.context.get('request')}
+            obj.subcategories.all(),
+            many=True,
+            context={"request": self.context.get("request")},
         )
         return serializer.data
 
