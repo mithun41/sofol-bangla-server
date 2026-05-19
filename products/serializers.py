@@ -37,6 +37,10 @@ class ProductSerializer(serializers.ModelSerializer):
     discount_price = serializers.SerializerMethodField()
     display_price = serializers.SerializerMethodField()
 
+    # 👇 ডাবল ক্লাউডিনারি লিংক ফিক্স করার জন্য ফিল্ড দুটিকে মেথড ফিল্ড করা হলো
+    image = serializers.SerializerMethodField()
+    barcode_image = serializers.SerializerMethodField()
+
     class Meta:
         model = Product
         fields = [
@@ -46,7 +50,7 @@ class ProductSerializer(serializers.ModelSerializer):
             "name",
             "slug",
             "description",
-            "purchase_price",  # আগের ফিল্ড ফিরিয়ে আনা হলো
+            "purchase_price",  # আগের ফিল্ড ফিরিয়ে আনা হলো
             "price",
             "unit_type",
             "unit_display",
@@ -56,7 +60,7 @@ class ProductSerializer(serializers.ModelSerializer):
             "barcode_number",
             "barcode_image",
             "is_active",
-            "is_featured",  # আগের ফিল্ড ফিরিয়ে আনা হলো
+            "is_featured",  # আগের ফিল্ড ফিরিয়ে আনা হলো
             "original_price",
             "discount_price",
             "display_price",
@@ -67,6 +71,25 @@ class ProductSerializer(serializers.ModelSerializer):
             # "barcode_number": {"read_only": True},
             "barcode_image": {"read_only": True},
         }
+
+    # 🔥 ১. ইমেজ থেকে প্রিলিংক বা ডাবল লিংক বাদ দেওয়ার মেথড
+    def get_image(self, obj):
+        if obj.image:
+            url_str = str(obj.image)
+            # যদি ডাবল লিংক জেনারেট হয়ে থাকে, তবে শেষের ফ্রেশ অংশটা কেটে নেবে
+            if url_str.count("https://") > 1:
+                return "https://" + url_str.split("https://")[-1]
+            return url_str
+        return ""
+
+    # 🔥 ২. বারকোড ইমেজ থেকে ডাবল লিংক বাদ দেওয়ার মেথড
+    def get_barcode_image(self, obj):
+        if obj.barcode_image:
+            url_str = str(obj.barcode_image)
+            if url_str.count("https://") > 1:
+                return "https://" + url_str.split("https://")[-1]
+            return url_str
+        return ""
 
     def get_discount_price(self, obj):
         """ইউজার একটিভ থাকলে ডিসকাউন্ট ক্যালকুলেট করা (Price - PV*2)"""
@@ -95,7 +118,7 @@ class ProductSerializer(serializers.ModelSerializer):
         """
         স্টক যেন পজিটিভ থাকে তা নিশ্চিত করা এবং ইনপুট ভ্যালিডেশন।
         """
-        # আপডেট বা ক্রিয়েট করার সময় স্টক চেক
+        # আপডেট বা ক্রিয়েট করার সময় স্টক চেক
         stock_val = data.get("stock", 0)
         try:
             if float(stock_val) < 0:
