@@ -8,18 +8,19 @@ from .models import Product, Category, Cart
 from django.db.models import Q 
 from rest_framework.permissions import IsAuthenticatedOrReadOnly
 from rest_framework.parsers import MultiPartParser, FormParser
+from rest_framework.pagination import PageNumberPagination
 
 class CategoryViewSet(viewsets.ModelViewSet):
     queryset = Category.objects.all()
     serializer_class = CategorySerializer
-    
+
     def get_queryset(self):
         queryset = Category.objects.all()
         is_main = self.request.query_params.get('main')
         if is_main == 'true':
             return queryset.filter(parent__isnull=True)
         return queryset
-    
+
     def get_permissions(self):
         if self.action in ['create', 'update', 'partial_update', 'destroy']:
             return [permissions.IsAdminUser()]
@@ -29,58 +30,121 @@ class CategoryViewSet(viewsets.ModelViewSet):
 
 
 
+# ── Pagination ────────────────────────────────────────────────────────────────
+class ProductPagination(PageNumberPagination):
+    page_size = 40  # একবারে ৪০টা
+    page_size_query_param = "page_size"
+    max_page_size = 200
+
+
+# ── ProductViewSet ─────────────────────────────────────────────────────────────
 class ProductViewSet(viewsets.ModelViewSet):
-    # ১. Router-এর basename এরর ফিক্স করার জন্য ডিফল্ট কুয়েরিসেট
-    queryset = Product.objects.all().order_by('-created_at')
+    queryset = Product.objects.all().order_by("-created_at")
     serializer_class = ProductSerializer
+    pagination_class = ProductPagination  # ← paginated response
 
     def get_queryset(self):
-        """
-        এখানে ডাইনামিক ফিল্টারিং এবং সার্চ হ্যান্ডেল করা হচ্ছে।
-        """
-        queryset = Product.objects.all().order_by('-created_at')
-        
-        # ইউআরএল থেকে সার্চ টার্ম নেওয়া হচ্ছে (যেমন: ?search=মধু)
-        search_query = self.request.query_params.get('search', None)
-        
-        if search_query:
-            # নাম, ডেসক্রিপশন অথবা বারকোড নম্বর দিয়ে সার্চ করবে
-            queryset = queryset.filter(
-                Q(name__icontains=search_query) | 
-                Q(description__icontains=search_query) |
-                Q(barcode_number__icontains=search_query)
+        # select_related + only — শুধু দরকারী fields, সব না
+        queryset = (
+            Product.objects.select_related("category")
+            .only(
+                "id",
+                "name",
+                "slug",
+                "price",
+                "purchase_price",
+                "stock",
+                "point_value",
+                "unit_type",
+                "image",
+                "barcode_number",
+                "barcode_image",
+                "is_active",
+                "is_featured",
+                "created_at",
+                "category__id",
+                "category__name",
             )
-            
+            .filter(is_active=True)
+            .order_by("-created_at")
+        )
+
+        search_query = self.request.query_params.get("search", None)
+        if search_query:
+            queryset = queryset.filter(
+                Q(name__icontains=search_query)
+                | Q(barcode_number__icontains=search_query)
+            )
+
+        # category filter
+        category_id = self.request.query_params.get("category", None)
+        if category_id:
+            queryset = queryset.filter(category_id=category_id)
+
+        # featured filter
+        featured = self.request.query_params.get("featured", None)
+        if featured == "true":
+            queryset = queryset.filter(is_featured=True)
+
         return queryset
 
     def get_permissions(self):
-        """
-        অ্যাডমিন ছাড়া অন্য কেউ প্রোডাক্ট তৈরি বা এডিট করতে পারবে না।
-        """
-        if self.action in ['create', 'update', 'partial_update', 'destroy']:
+        if self.action in ["create", "update", "partial_update", "destroy"]:
             return [permissions.IsAdminUser()]
-        # list, retrieve এবং get_by_barcode সবাই অ্যাক্সেস করতে পারবে
         return [permissions.AllowAny()]
 
-    # ২. বারকোড দিয়ে প্রোডাক্ট খোঁজার কাস্টম এপিআই (যেমন: /api/products/get_by_barcode/?code=123)
-    @action(detail=False, methods=['get'], url_path='get_by_barcode')
-    def get_by_barcode(self, request):
-        barcode = request.query_params.get('code')
-        
-        if not barcode:
-            return Response({"error": "বারকোড পাওয়া যায়নি!"}, status=status.HTTP_400_BAD_REQUEST)
+    # Admin panel এ সব product লাগে (inactive সহ), pagination ছাড়া
+    @action(detail=False, methods=["get"], url_path="all")
+    def all_products(self, request):
+        """
+        GET /api/products/products/all/
+        Admin এর ManageProducts page এ ব্যবহার হবে।
+        Pagination নেই — সব product একসাথে।
+        """
+        if not request.user.is_staff:
+            return Response({"error": "Permission denied"}, status=403)
 
-        try:
-            # এখানে filter ব্যবহার করে .first() নেওয়া নিরাপদ
-            product = Product.objects.filter(barcode_number=barcode, is_active=True).first()
-            
-            if not product:
-                return Response({"error": "এই বারকোডের কোনো প্রোডাক্ট সিস্টেমে নেই!"}, status=status.HTTP_404_NOT_FOUND)
-                
-            serializer = self.get_serializer(product)
-            return Response(serializer.data)
-        except Exception as e:
-            return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        queryset = (
+            Product.objects.select_related("category")
+            .only(
+                "id",
+                "name",
+                "price",
+                "purchase_price",
+                "stock",
+                "point_value",
+                "unit_type",
+                "image",
+                "barcode_number",
+                "barcode_image",
+                "is_active",
+                "is_featured",
+                "created_at",
+                "category__id",
+                "category__name",
+            )
+            .order_by("-created_at")
+        )
+
+        search = request.query_params.get("search", "")
+        if search:
+            queryset = queryset.filter(
+                Q(name__icontains=search) | Q(barcode_number__icontains=search)
+            )
+
+        serializer = self.get_serializer(queryset, many=True)
+        return Response(serializer.data)
+
+    @action(detail=False, methods=["get"], url_path="get_by_barcode")
+    def get_by_barcode(self, request):
+        code = request.query_params.get("code")
+        if not code:
+            return Response({"error": "Barcode not provided"}, status=400)
+        product = Product.objects.filter(barcode_number=code, is_active=True).first()
+        if not product:
+            return Response({"error": "Product not found"}, status=404)
+        return Response(self.get_serializer(product).data)
+
 
 class CartSyncView(APIView):
     permission_classes = [permissions.AllowAny]
@@ -127,10 +191,6 @@ class CartSyncView(APIView):
             })
             
         return Response(data)
-
-
-
-
 
 
 class CartViewSet(viewsets.ModelViewSet):
@@ -190,7 +250,7 @@ class CartViewSet(viewsets.ModelViewSet):
         return Response({
             "message": "Your cart is empty"
         }, status=status.HTTP_200_OK)
-        
+
 
 class BannerViewSet(viewsets.ModelViewSet):
     queryset = Banner.objects.all().order_by('-created_at') # অ্যাডমিনে সব দেখাবে
