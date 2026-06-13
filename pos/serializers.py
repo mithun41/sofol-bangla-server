@@ -21,6 +21,7 @@ class POSProductSerializer(serializers.ModelSerializer):
             "name",
             "price",
             "stock",
+            "unit_type",
             "image",
             "point_value",
             "barcode_number",

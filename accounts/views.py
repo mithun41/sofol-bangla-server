@@ -436,17 +436,44 @@ class BinaryTreeView(APIView):
         if not user:
             return Response({"error": "User not found"}, status=404)
 
-        def get_tree(current_user, depth=0):
-            if not current_user or depth > 3:
+        max_depth = 10
+        levels = [{user.id: user}]
+        all_users = [user]
+
+        # Fetch tree level by level using IN query to avoid N+1 DB queries
+        for d in range(max_depth):
+            parent_ids = list(levels[d].keys())
+            if not parent_ids:
+                break
+            children = list(User.objects.filter(placement_under_id__in=parent_ids))
+            if not children:
+                break
+            level_dict = {child.id: child for child in children}
+            levels.append(level_dict)
+            all_users.extend(children)
+
+        # Build an in-memory parent-to-children map
+        children_map = {}
+        for u in all_users:
+            if u.placement_under_id:
+                if u.placement_under_id not in children_map:
+                    children_map[u.placement_under_id] = {}
+                children_map[u.placement_under_id][u.position] = u
+
+        def build_node(current_user, depth=0):
+            if not current_user or depth > max_depth:
                 return None
 
-            # ইমেজ ইউআরএল হ্যান্ডেল করা
+            # Handle image URL safely
             if current_user.profile_picture:
                 profile_pic_url = request.build_absolute_uri(
                     current_user.profile_picture.url
                 )
             else:
                 profile_pic_url = f"https://ui-avatars.com/api/?name={current_user.username}&background=random&color=fff"
+
+            left_child = children_map.get(current_user.id, {}).get("left")
+            right_child = children_map.get(current_user.id, {}).get("right")
 
             return {
                 "username": current_user.username,
@@ -455,21 +482,12 @@ class BinaryTreeView(APIView):
                 "division": current_user.division,
                 "placement_id": current_user.placement_id,
                 "profile_picture": profile_pic_url,
-                "left": get_tree(
-                    User.objects.filter(
-                        placement_under=current_user, position="left"
-                    ).first(),
-                    depth + 1,
-                ),
-                "right": get_tree(
-                    User.objects.filter(
-                        placement_under=current_user, position="right"
-                    ).first(),
-                    depth + 1,
-                ),
+                "level": depth, # Store depth directly from backend
+                "left": build_node(left_child, depth + 1),
+                "right": build_node(right_child, depth + 1),
             }
 
-        return Response(get_tree(user))
+        return Response(build_node(user))
 
 
 # --- FINANCIALS ---
