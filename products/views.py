@@ -178,14 +178,14 @@ class ProductViewSet(viewsets.ModelViewSet):
         sold_data = sold_qs.aggregate(total_sold=Sum('quantity'))
         sold_this_month = sold_data.get('total_sold') or 0
 
-        sold_items = sold_qs.values('product__id', 'product__name').annotate(
+        sold_items = sold_qs.values('product_id', 'product_name').annotate(
             total_quantity=Sum('quantity')
         ).order_by('-total_quantity')
         
         sold_list = [
             {
-                "id": item['product__id'],
-                "name": item['product__name'],
+                "id": item['product_id'],
+                "name": item['product_name'],
                 "quantity": float(item['total_quantity'])
             } for item in sold_items
         ]
