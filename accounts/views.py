@@ -1003,6 +1003,12 @@ class MyNetworkView(APIView):
                 "all_team": UserListSerializer(
                     left_stats["members"] + right_stats["members"], many=True
                 ).data,
+                "left_team": UserListSerializer(
+                    left_stats["members"], many=True
+                ).data,
+                "right_team": UserListSerializer(
+                    right_stats["members"], many=True
+                ).data,
                 "summary": {
                     "username": user.username,
                     "total_referrals": referrals.count(),
