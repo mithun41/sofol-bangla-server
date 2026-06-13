@@ -9,6 +9,7 @@ from django.db import transaction
 # =====================================================================
 class OrderItemSerializer(serializers.ModelSerializer):
     product_image = serializers.SerializerMethodField()
+    unit_type = serializers.SerializerMethodField()
 
     class Meta:
         model = OrderItem
@@ -21,9 +22,17 @@ class OrderItemSerializer(serializers.ModelSerializer):
             "price",
             "profit",
             "point_value",
+            "unit_type",
         ]
         # এই ফিল্ডগুলো শুধু দেখাবে, ইনপুট হিসেবে নিবে না
         read_only_fields = ["purchase_price", "profit"]
+
+    def get_unit_type(self, obj):
+        try:
+            product = Product.objects.get(id=obj.product_id)
+            return product.unit_type
+        except Exception:
+            return "piece"
 
     # 🔥 [FIXED] অর্ডারের ভেতরের প্রোডাক্ট ইমেজ ডাবল ইউআরএল ও লোকাল ডোমেইন জট ক্লিনআপ মেthod
     def get_product_image(self, obj):
