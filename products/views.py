@@ -151,7 +151,7 @@ class ProductViewSet(viewsets.ModelViewSet):
     def report(self, request):
         """
         GET /api/products/report/
-        Returns products added and sold this month.
+        Returns products added and sold this month, along with their detailed lists.
         """
         if not request.user.is_staff:
             return Response({"error": "Permission denied"}, status=403)
@@ -159,18 +159,42 @@ class ProductViewSet(viewsets.ModelViewSet):
         now = timezone.now()
         start_of_month = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
 
-        added_this_month = Product.objects.filter(created_at__gte=start_of_month).count()
+        added_qs = Product.objects.filter(created_at__gte=start_of_month).order_by("-created_at")
+        added_this_month = added_qs.count()
+        added_list = [
+            {
+                "id": p.id,
+                "name": p.name,
+                "stock": float(p.stock),
+                "barcode": p.barcode_number
+            } for p in added_qs
+        ]
         
-        sold_data = OrderItem.objects.filter(
+        sold_qs = OrderItem.objects.filter(
             order__status="Completed",
             order__created_at__gte=start_of_month
-        ).aggregate(total_sold=Sum('quantity'))
+        )
         
+        sold_data = sold_qs.aggregate(total_sold=Sum('quantity'))
         sold_this_month = sold_data.get('total_sold') or 0
+
+        sold_items = sold_qs.values('product__id', 'product__name').annotate(
+            total_quantity=Sum('quantity')
+        ).order_by('-total_quantity')
+        
+        sold_list = [
+            {
+                "id": item['product__id'],
+                "name": item['product__name'],
+                "quantity": float(item['total_quantity'])
+            } for item in sold_items
+        ]
 
         return Response({
             "added_this_month": added_this_month,
-            "sold_this_month": int(sold_this_month) if sold_this_month else 0
+            "sold_this_month": int(sold_this_month) if sold_this_month else 0,
+            "added_products": added_list,
+            "sold_products": sold_list
         })
 
 
