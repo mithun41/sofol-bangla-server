@@ -152,6 +152,7 @@ class UserListSerializer(serializers.ModelSerializer):
             "reff_id_input",
             "placement_id_input",
             "status",
+            "is_active",
             "star_level",
             "role",
             "createdAt",

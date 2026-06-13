@@ -867,6 +867,8 @@ class UserUpdateView(generics.RetrieveUpdateAPIView):
                 # ৩. সাধারণ তথ্য আপডেট
                 if "status" in data:
                     user.status = data["status"]
+                if "is_active" in data:
+                    user.is_active = data["is_active"]
                 if "name" in data:
                     user.name = data["name"]
                 if "phone" in data:
