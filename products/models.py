@@ -163,6 +163,7 @@ class Product(models.Model):
     # স্ট্যাটাস ফিল্ডস
     is_active = models.BooleanField(default=True)
     is_featured = models.BooleanField(default=False)
+    expiry_date = models.DateField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
     def save(self, *args, **kwargs):

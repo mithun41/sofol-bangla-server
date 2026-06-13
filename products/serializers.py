@@ -85,6 +85,7 @@ class ProductSerializer(serializers.ModelSerializer):
             "barcode_image",
             "is_active",
             "is_featured",
+            "expiry_date",
             "original_price",
             "discount_price",
             "display_price",
