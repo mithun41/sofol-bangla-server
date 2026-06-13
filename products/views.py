@@ -5,10 +5,12 @@ from rest_framework.decorators import action
 from .models import Banner, Product, Category
 from .serializers import BannerSerializer, CartSerializer, ProductSerializer, CategorySerializer
 from .models import Product, Category, Cart
-from django.db.models import Q 
+from django.db.models import Q, Sum
+from django.utils import timezone
 from rest_framework.permissions import IsAuthenticatedOrReadOnly
 from rest_framework.parsers import MultiPartParser, FormParser
 from rest_framework.pagination import PageNumberPagination
+from orders.models import OrderItem
 
 class CategoryViewSet(viewsets.ModelViewSet):
     queryset = Category.objects.all()
@@ -144,6 +146,32 @@ class ProductViewSet(viewsets.ModelViewSet):
         if not product:
             return Response({"error": "Product not found"}, status=404)
         return Response(self.get_serializer(product).data)
+
+    @action(detail=False, methods=["get"], url_path="report")
+    def report(self, request):
+        """
+        GET /api/products/report/
+        Returns products added and sold this month.
+        """
+        if not request.user.is_staff:
+            return Response({"error": "Permission denied"}, status=403)
+
+        now = timezone.now()
+        start_of_month = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+
+        added_this_month = Product.objects.filter(created_at__gte=start_of_month).count()
+        
+        sold_data = OrderItem.objects.filter(
+            order__status="Completed",
+            order__created_at__gte=start_of_month
+        ).aggregate(total_sold=Sum('quantity'))
+        
+        sold_this_month = sold_data.get('total_sold') or 0
+
+        return Response({
+            "added_this_month": added_this_month,
+            "sold_this_month": int(sold_this_month) if sold_this_month else 0
+        })
 
 
 class CartSyncView(APIView):
