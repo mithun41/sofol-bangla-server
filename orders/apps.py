@@ -6,5 +6,5 @@ class OrdersConfig(AppConfig):
 
     def ready(self):
         # এই প্রিন্টটি দাও যাতে সার্ভার চালু হলেই বুঝতে পারো
-        print("\n✅ ORDERS APP IS READY AND SIGNALS ARE LOADING...\n")
+        print("\n[SUCCESS] ORDERS APP IS READY AND SIGNALS ARE LOADING...\n")
         import orders.signals

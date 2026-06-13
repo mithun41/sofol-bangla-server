@@ -6,9 +6,10 @@ from django.db.models.functions import Coalesce
 
 from django.utils import timezone
 from django.db import transaction
-from django.db.models import Count, Sum, F, DecimalField
+from django.db.models import Count, Sum, F, DecimalField, Q
 from django.db.models.functions import Coalesce
 from rest_framework import generics, permissions, status
+from rest_framework.pagination import PageNumberPagination
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated, IsAdminUser
@@ -131,10 +132,83 @@ class OrderCreateView(APIView):
 
 
 # --- বাকি অ্যাডমিন ও ইউজার ভিউগুলো একই থাকবে ---
+from collections import OrderedDict
+
+class OrderPagination(PageNumberPagination):
+    page_size = 20
+    page_size_query_param = 'page_size'
+    max_page_size = 100
+
+
+class AdminOrderPagination(PageNumberPagination):
+    page_size = 20
+    page_size_query_param = 'page_size'
+    max_page_size = 100
+
+    def get_paginated_response(self, data):
+        status_counts = Order.objects.aggregate(
+            total=Count('id'),
+            pending=Count('id', filter=Q(status='Pending')),
+            processing=Count('id', filter=Q(status='Processing')),
+            shipping=Count('id', filter=Q(status='Shipping')),
+            completed=Count('id', filter=Q(status='Completed')),
+            cancelled=Count('id', filter=Q(status='Cancelled'))
+        )
+        return Response(OrderedDict([
+            ('count', self.page.paginator.count),
+            ('next', self.get_next_link()),
+            ('previous', self.get_previous_link()),
+            ('results', data),
+            ('stats', {
+                'total': status_counts['total'] or 0,
+                'pending': status_counts['pending'] or 0,
+                'processing': status_counts['processing'] or 0,
+                'shipping': status_counts['shipping'] or 0,
+                'completed': status_counts['completed'] or 0,
+                'cancelled': status_counts['cancelled'] or 0,
+            })
+        ]))
+
+
 class AdminOrderListView(generics.ListAPIView):
-    queryset = Order.objects.all().order_by("-created_at")
     serializer_class = OrderSerializer
     permission_classes = [IsAdminUser]
+    pagination_class = AdminOrderPagination
+
+    def get_queryset(self):
+        queryset = Order.objects.all().order_by("-created_at")
+        
+        # 1. Search filter
+        search = self.request.query_params.get("search", None)
+        if search:
+            queryset = queryset.filter(
+                Q(name__icontains=search) |
+                Q(order_number__icontains=search) |
+                Q(phone__icontains=search)
+            )
+            
+        # 2. Status filter
+        status_param = self.request.query_params.get("status", None)
+        if status_param and status_param != "All":
+            queryset = queryset.filter(status=status_param)
+            
+        # 3. Order type filter (POS or Website)
+        order_type = self.request.query_params.get("type", None)
+        if order_type == "pos":
+            queryset = queryset.filter(address="POS Counter Sale")
+        elif order_type == "website":
+            queryset = queryset.exclude(address="POS Counter Sale")
+            
+        # 4. Date range filter
+        date_from = self.request.query_params.get("date_from", None)
+        if date_from:
+            queryset = queryset.filter(created_at__date__gte=date_from)
+            
+        date_to = self.request.query_params.get("date_to", None)
+        if date_to:
+            queryset = queryset.filter(created_at__date__lte=date_to)
+            
+        return queryset
 
 class AdminOrderUpdateView(generics.UpdateAPIView):
     queryset = Order.objects.all()
@@ -144,7 +218,7 @@ class AdminOrderUpdateView(generics.UpdateAPIView):
 class UserOrderListView(generics.ListAPIView):
     serializer_class = OrderSerializer
     permission_classes = [IsAuthenticated]
-
+    pagination_class = OrderPagination
 
     def get_queryset(self):
         return Order.objects.filter(user=self.request.user).order_by("-created_at")
