@@ -97,7 +97,7 @@ class POSOrderCreate(APIView):
                     product = Product.objects.select_for_update().get(id=item["product_id"])
                     qty     = Decimal(str(item.get("quantity", "1")))
 
-                    if product.stock < int(qty):
+                    if product.stock < qty:
                         raise Exception(f"{product.name} আউট অফ স্টক!")
 
                     original_price = Decimal(str(product.price))
@@ -116,7 +116,7 @@ class POSOrderCreate(APIView):
                     order_items.append({
                         "product_id":    product.id,
                         "product_name":  product.name,
-                        "quantity":      int(qty),
+                        "quantity":      qty,
                         "price":         final_price,
                         "point_value":   final_pv,
                         "purchase_price": Decimal(str(product.purchase_price or "0")),
