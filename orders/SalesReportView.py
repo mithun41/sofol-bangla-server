@@ -190,7 +190,7 @@ class SalesReportView(APIView):
                 ),
                 profit=Coalesce(Sum("profit"), Value(0, output_field=DecimalField())),
             )
-            .order_by("-revenue")[:10]
+            .order_by("-revenue")
         )
 
         # ── Status breakdown ─────────────────────────────────────────────────
