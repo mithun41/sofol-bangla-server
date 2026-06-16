@@ -106,6 +106,34 @@ class ProductViewSet(viewsets.ModelViewSet):
                 soon_date = today + timezone.timedelta(days=5)
                 queryset = queryset.filter(expiry_date__gte=today, expiry_date__lte=soon_date)
 
+        # date range filter (for added products)
+        start_date_str = self.request.query_params.get("start_date")
+        end_date_str = self.request.query_params.get("end_date")
+
+        if start_date_str or end_date_str:
+            from django.utils.dateparse import parse_date
+            from datetime import datetime, time
+            
+            start_dt = None
+            end_dt = None
+
+            if start_date_str:
+                parsed_start = parse_date(start_date_str)
+                if parsed_start:
+                    start_dt = timezone.make_aware(datetime.combine(parsed_start, time.min))
+            
+            if end_date_str:
+                parsed_end = parse_date(end_date_str)
+                if parsed_end:
+                    end_dt = timezone.make_aware(datetime.combine(parsed_end, time.max))
+
+            if start_dt and end_dt:
+                queryset = queryset.filter(created_at__range=(start_dt, end_dt))
+            elif start_dt:
+                queryset = queryset.filter(created_at__gte=start_dt)
+            elif end_dt:
+                queryset = queryset.filter(created_at__lte=end_dt)
+
         return queryset
 
     def get_permissions(self):
