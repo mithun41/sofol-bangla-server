@@ -169,17 +169,34 @@ class ProductViewSet(viewsets.ModelViewSet):
     @action(detail=False, methods=["get"], url_path="report")
     def report(self, request):
         """
-        GET /api/products/report/
-        Returns products added and sold this month, along with their detailed lists.
+        GET /api/products/report/?start_date=YYYY-MM-DD&end_date=YYYY-MM-DD
+        Returns products added within the date range. Defaults to today.
         """
         if not request.user.is_staff:
             return Response({"error": "Permission denied"}, status=403)
 
-        now = timezone.now()
-        start_of_month = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+        start_date_str = request.query_params.get("start_date")
+        end_date_str = request.query_params.get("end_date")
 
-        added_qs = Product.objects.filter(created_at__gte=start_of_month).order_by("-created_at")
-        added_this_month = added_qs.count()
+        added_qs = Product.objects.all()
+
+        if start_date_str and end_date_str:
+            from django.utils.dateparse import parse_date
+            from datetime import datetime, time
+            start_date = parse_date(start_date_str)
+            end_date = parse_date(end_date_str)
+            if start_date and end_date:
+                start_dt = timezone.make_aware(datetime.combine(start_date, time.min))
+                end_dt = timezone.make_aware(datetime.combine(end_date, time.max))
+                added_qs = added_qs.filter(created_at__range=(start_dt, end_dt))
+        else:
+            # Default to today
+            now = timezone.now()
+            start_of_day = now.replace(hour=0, minute=0, second=0, microsecond=0)
+            added_qs = added_qs.filter(created_at__gte=start_of_day)
+
+        added_qs = added_qs.order_by("-created_at")
+        added_count = added_qs.count()
         added_list = [
             {
                 "id": p.id,
@@ -188,32 +205,10 @@ class ProductViewSet(viewsets.ModelViewSet):
                 "barcode": p.barcode_number
             } for p in added_qs
         ]
-        
-        sold_qs = OrderItem.objects.filter(
-            order__status="Completed",
-            order__created_at__gte=start_of_month
-        )
-        
-        sold_data = sold_qs.aggregate(total_sold=Sum('quantity'))
-        sold_this_month = sold_data.get('total_sold') or 0
-
-        sold_items = sold_qs.values('product_id', 'product_name').annotate(
-            total_quantity=Sum('quantity')
-        ).order_by('-total_quantity')
-        
-        sold_list = [
-            {
-                "id": item['product_id'],
-                "name": item['product_name'],
-                "quantity": float(item['total_quantity'])
-            } for item in sold_items
-        ]
 
         return Response({
-            "added_this_month": added_this_month,
-            "sold_this_month": int(sold_this_month) if sold_this_month else 0,
+            "added_count": added_count,
             "added_products": added_list,
-            "sold_products": sold_list
         })
 
 
