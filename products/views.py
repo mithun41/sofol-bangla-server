@@ -64,6 +64,7 @@ class ProductViewSet(viewsets.ModelViewSet):
                 "is_active",
                 "is_featured",
                 "created_at",
+                "expiry_date",
                 "category__id",
                 "category__name",
             )
@@ -122,6 +123,7 @@ class ProductViewSet(viewsets.ModelViewSet):
                 "is_active",
                 "is_featured",
                 "created_at",
+                "expiry_date",
                 "category__id",
                 "category__name",
             )
