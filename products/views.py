@@ -89,6 +89,23 @@ class ProductViewSet(viewsets.ModelViewSet):
         if featured == "true":
             queryset = queryset.filter(is_featured=True)
 
+        # stock status filter
+        stock_status = self.request.query_params.get("stock_status", None)
+        if stock_status == "out":
+            queryset = queryset.filter(stock__lte=0)
+        elif stock_status == "low":
+            queryset = queryset.filter(stock__gt=0, stock__lt=5)
+
+        # expiry status filter
+        expiry_status = self.request.query_params.get("expiry_status", None)
+        if expiry_status:
+            today = timezone.now().date()
+            if expiry_status == "expired":
+                queryset = queryset.filter(expiry_date__lt=today)
+            elif expiry_status == "expiring_soon":
+                soon_date = today + timezone.timedelta(days=5)
+                queryset = queryset.filter(expiry_date__gte=today, expiry_date__lte=soon_date)
+
         return queryset
 
     def get_permissions(self):
