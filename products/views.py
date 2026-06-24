@@ -293,7 +293,7 @@ class CartViewSet(viewsets.ModelViewSet):
 
     def get_queryset(self):
         # Only show cart items for the currently logged-in user
-        return Cart.objects.filter(user=self.request.user)
+        return Cart.objects.filter(user=self.request.user).order_by('created_at')
 
     def get_serializer_context(self):
         context = super().get_serializer_context()
