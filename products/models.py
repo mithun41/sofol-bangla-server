@@ -165,6 +165,7 @@ class Product(models.Model):
     is_featured = models.BooleanField(default=False)
     expiry_date = models.DateField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
 
     def save(self, *args, **kwargs):
         # ১. অটোমেটিক স্লাগ জেনারেট করা

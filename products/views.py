@@ -216,14 +216,14 @@ class ProductViewSet(viewsets.ModelViewSet):
             if start_date and end_date:
                 start_dt = timezone.make_aware(datetime.combine(start_date, time.min))
                 end_dt = timezone.make_aware(datetime.combine(end_date, time.max))
-                added_qs = added_qs.filter(created_at__range=(start_dt, end_dt))
+                added_qs = added_qs.filter(updated_at__range=(start_dt, end_dt))
         else:
             # Default to today
             now = timezone.now()
             start_of_day = now.replace(hour=0, minute=0, second=0, microsecond=0)
-            added_qs = added_qs.filter(created_at__gte=start_of_day)
+            added_qs = added_qs.filter(updated_at__gte=start_of_day)
 
-        added_qs = added_qs.order_by("-created_at")
+        added_qs = added_qs.order_by("-updated_at")
         added_count = added_qs.count()
         added_list = [
             {
