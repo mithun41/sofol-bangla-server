@@ -64,12 +64,13 @@ class ProductViewSet(viewsets.ModelViewSet):
                 "is_active",
                 "is_featured",
                 "created_at",
+                "updated_at",
                 "expiry_date",
                 "category__id",
                 "category__name",
             )
             .filter(is_active=True)
-            .order_by("-created_at")
+            .order_by("-updated_at")
         )
 
         search_query = self.request.query_params.get("search", None)
@@ -128,11 +129,11 @@ class ProductViewSet(viewsets.ModelViewSet):
                     end_dt = timezone.make_aware(datetime.combine(parsed_end, time.max))
 
             if start_dt and end_dt:
-                queryset = queryset.filter(created_at__range=(start_dt, end_dt))
+                queryset = queryset.filter(updated_at__range=(start_dt, end_dt))
             elif start_dt:
-                queryset = queryset.filter(created_at__gte=start_dt)
+                queryset = queryset.filter(updated_at__gte=start_dt)
             elif end_dt:
-                queryset = queryset.filter(created_at__lte=end_dt)
+                queryset = queryset.filter(updated_at__lte=end_dt)
 
         return queryset
 
@@ -168,11 +169,12 @@ class ProductViewSet(viewsets.ModelViewSet):
                 "is_active",
                 "is_featured",
                 "created_at",
+                "updated_at",
                 "expiry_date",
                 "category__id",
                 "category__name",
             )
-            .order_by("-created_at")
+            .order_by("-updated_at")
         )
 
         search = request.query_params.get("search", "")
