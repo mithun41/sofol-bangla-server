@@ -129,11 +129,11 @@ class ProductViewSet(viewsets.ModelViewSet):
                     end_dt = timezone.make_aware(datetime.combine(parsed_end, time.max))
 
             if start_dt and end_dt:
-                queryset = queryset.filter(updated_at__range=(start_dt, end_dt))
+                queryset = queryset.filter(last_stock_added_at__range=(start_dt, end_dt))
             elif start_dt:
-                queryset = queryset.filter(updated_at__gte=start_dt)
+                queryset = queryset.filter(last_stock_added_at__gte=start_dt)
             elif end_dt:
-                queryset = queryset.filter(updated_at__lte=end_dt)
+                queryset = queryset.filter(last_stock_added_at__lte=end_dt)
 
         return queryset
 
@@ -170,6 +170,7 @@ class ProductViewSet(viewsets.ModelViewSet):
                 "is_featured",
                 "created_at",
                 "updated_at",
+                "last_stock_added_at",
                 "expiry_date",
                 "category__id",
                 "category__name",
@@ -218,14 +219,14 @@ class ProductViewSet(viewsets.ModelViewSet):
             if start_date and end_date:
                 start_dt = timezone.make_aware(datetime.combine(start_date, time.min))
                 end_dt = timezone.make_aware(datetime.combine(end_date, time.max))
-                added_qs = added_qs.filter(updated_at__range=(start_dt, end_dt))
+                added_qs = added_qs.filter(last_stock_added_at__range=(start_dt, end_dt))
         else:
             # Default to today
             now = timezone.now()
             start_of_day = now.replace(hour=0, minute=0, second=0, microsecond=0)
-            added_qs = added_qs.filter(updated_at__gte=start_of_day)
+            added_qs = added_qs.filter(last_stock_added_at__gte=start_of_day)
 
-        added_qs = added_qs.order_by("-updated_at")
+        added_qs = added_qs.order_by("-last_stock_added_at")
         added_count = added_qs.count()
         added_list = [
             {

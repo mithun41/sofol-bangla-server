@@ -12,6 +12,7 @@ from django.db import models
 from django.utils.text import slugify
 from django.conf import settings
 from django.core.files.base import ContentFile
+from django.utils import timezone
 
 # বারকোড লাইব্রেরি ইম্পোর্ট
 import barcode
@@ -164,6 +165,7 @@ class Product(models.Model):
     is_active = models.BooleanField(default=True)
     is_featured = models.BooleanField(default=False)
     expiry_date = models.DateField(null=True, blank=True)
+    last_stock_added_at = models.DateTimeField(default=timezone.now)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -179,12 +181,14 @@ class Product(models.Model):
                 number = "".join([str(random.randint(0, 9)) for _ in range(13)])
             self.barcode_number = number
 
-        # ৩. বারকোড ইমেজ জেনারেট লজিক
+        # ৩. বারকোড ইমেজ জেনারেট লজিক এবং স্টক চেক
         if self.pk:
             try:
                 old_product = Product.objects.get(pk=self.pk)
                 if old_product.barcode_number != self.barcode_number:
                     self.generate_barcode_image()
+                if Decimal(str(self.stock)) > Decimal(str(old_product.stock)):
+                    self.last_stock_added_at = timezone.now()
             except Product.DoesNotExist:
                 pass
         else:

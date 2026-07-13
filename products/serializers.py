@@ -89,7 +89,9 @@ class ProductSerializer(serializers.ModelSerializer):
             "original_price",
             "discount_price",
             "display_price",
+            "last_stock_added_at",
             "created_at",
+            "updated_at",
         ]
         extra_kwargs = {
             "is_active": {"read_only": True},
