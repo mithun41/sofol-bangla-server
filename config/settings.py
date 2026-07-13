@@ -199,6 +199,11 @@ STORAGES = {
 # 🛠️ গ্লোবাল এনভায়রনমেন্ট প্রক্সি সেটিংস (সুরক্ষার জন্য রাখা হলো)
 import os
 
+# ড্যাঙ্গো যেন ডাটাবেজ হোস্টকে প্রক্সির বাইরে রাখে
+os.environ["no_proxy"] = "localhost,127.0.0.1,.pythonanywhere-services.com,mithun41.mysql.pythonanywhere-services.com"
+os.environ["NO_PROXY"] = "localhost,127.0.0.1,.pythonanywhere-services.com,mithun41.mysql.pythonanywhere-services.com"
+
+# অন্যান্য এক্সটার্নাল রিকোয়েস্টের (যেমন: Cloudinary) জন্য প্রক্সি
 os.environ["http_proxy"] = "http://proxy.server:3128"
 os.environ["https_proxy"] = "http://proxy.server:3128"
 os.environ["HTTP_PROXY"] = "http://proxy.server:3128"
